@@ -9,7 +9,7 @@ API_KEY = "ollama"
 
 MODEL_NAME = "llama3.2:latest"
 
-MAX_TOKENS = 1000
+MAX_TOKENS = 2048
 
 TEMPERATURE = 0
 
