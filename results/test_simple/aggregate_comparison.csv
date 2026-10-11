@@ -1,0 +1,2 @@
+strategy,num_examples,correct,accuracy,accuracy_percentage,mean_latency_seconds,median_latency_seconds,total_latency_seconds,error_cascade_rate,error_cascade_rate_percentage,repair_success_rate,repair_success_rate_percentage,collateral_damage_rate,collateral_damage_rate_percentage,mean_recovery_attempts,examples_needing_recovery
+a0,3,2,0.6666666666666666,66.66666666666666,24.706346035003662,22.21149969100952,74.11903810501099,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0

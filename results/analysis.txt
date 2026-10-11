@@ -1,0 +1,87 @@
+================================================================================
+ATBP EVALUATION ANALYSIS REPORT
+================================================================================
+
+
+A0_BASELINE
+--------------------------------------------------------------------------------
+Examples: 100
+Correct: 56
+Accuracy: 56.00%
+
+Metrics:
+  Error Cascade Rate (ECR):    0.00%
+  Repair Success Rate (RSR):   0.00%
+  Collateral Damage Rate (CDR):0.00%
+  Mean Latency:                22.90s
+  Median Latency:              19.00s
+
+Recovery Statistics:
+  Examples needing recovery:   0
+  Mean recovery attempts:      0.00
+
+A2_FULL_REGENERATION
+--------------------------------------------------------------------------------
+Examples: 72
+Correct: 44
+Accuracy: 61.11%
+
+Metrics:
+  Error Cascade Rate (ECR):    0.00%
+  Repair Success Rate (RSR):   0.00%
+  Collateral Damage Rate (CDR):0.00%
+  Mean Latency:                42.05s
+  Median Latency:              36.38s
+
+Recovery Statistics:
+  Examples needing recovery:   0
+  Mean recovery attempts:      0.00
+
+A3_TARGETED_REPAIR
+--------------------------------------------------------------------------------
+Examples: 98
+Correct: 57
+Accuracy: 58.16%
+
+Metrics:
+  Error Cascade Rate (ECR):    0.00%
+  Repair Success Rate (RSR):   73.68%
+  Collateral Damage Rate (CDR):3.63%
+  Mean Latency:                45.49s
+  Median Latency:              38.90s
+
+Recovery Statistics:
+  Examples needing recovery:   28
+  Mean recovery attempts:      1.36
+
+A4_ADAPTIVE_RECOVERY
+--------------------------------------------------------------------------------
+Examples: 99
+Correct: 63
+Accuracy: 63.64%
+
+Metrics:
+  Error Cascade Rate (ECR):    0.00%
+  Repair Success Rate (RSR):   0.00%
+  Collateral Damage Rate (CDR):0.00%
+  Mean Latency:                49.39s
+  Median Latency:              37.98s
+
+Recovery Statistics:
+  Examples needing recovery:   25
+  Mean recovery attempts:      3.76
+
+================================================================================
+STRATEGY COMPARISON
+================================================================================
+
+Accuracy Ranking:
+  1. a4_adaptive_recovery               :  63.6%
+  2. a2_full_regeneration               :  61.1%
+  3. a3_targeted_repair                 :  58.2%
+  4. a0_baseline                        :  56.0%
+
+Improvement vs A0 Baseline (56.0%):
+  a2_full_regeneration               : +9.1%
+  a3_targeted_repair                 : +3.9%
+  a4_adaptive_recovery               : +13.6%
