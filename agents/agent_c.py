@@ -23,6 +23,11 @@ Give:
 
 Do not mention the multi-agent system.
 
+IMPORTANT: Your final line MUST be exactly:
+**Answer:** [the single final numerical value, digits only, no units or explanation]
+
+Do not write anything after the Answer line.
+
 Original problem:
 {problem}
 
