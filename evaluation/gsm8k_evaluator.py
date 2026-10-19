@@ -11,6 +11,9 @@ def extract_gsm8k_answer(text):
 
 
 def extract_prediction(text):
+    if text is None:
+        return None
+    
     # Priority 1: Look for "**Answer:** <number>" or "Answer: <number>" (case-insensitive)
     answer_pattern = r"\*?\*?Answer\*?\*?:\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
     match = re.search(answer_pattern, text, re.IGNORECASE)
