@@ -1,12 +1,4 @@
-from openai import OpenAI
-from config.config import MODEL_NAME, MAX_TOKENS, TEMPERATURE
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",
-    timeout=180.0
-)
+from src.llm_client import call_llm
 
 
 def agent_b(problem, agent_a_output):
@@ -36,20 +28,11 @@ Agent A reasoning:
 Provide the intermediate solution clearly.
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are Agent B, the intermediate solver."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
-
-    return response.choices[0].message.content
+    try:
+        text, _, _ = call_llm(
+            system_prompt="You are Agent B, the intermediate solver.",
+            user_content=prompt,
+        )
+        return text
+    except Exception as e:
+        return f"[Error in Agent B: {str(e)[:200]}]"

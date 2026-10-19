@@ -13,7 +13,10 @@ This script:
 """
 
 import sys
+import io
 sys.path.insert(0, '.')
+# Force UTF-8 output on Windows to avoid cp1252 UnicodeEncodeError
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 import json
 import time

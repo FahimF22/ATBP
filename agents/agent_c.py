@@ -1,12 +1,4 @@
-from openai import OpenAI
-from config.config import API_KEY, MODEL_NAME, MAX_TOKENS, TEMPERATURE
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",
-    timeout=180.0
-)
+from src.llm_client import call_llm
 
 
 def agent_c(problem, agent_a_output, agent_b_output):
@@ -37,20 +29,8 @@ Agent B:
 {agent_b_output}
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are Agent C, the final answer generator."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    text, _, _ = call_llm(
+        system_prompt="You are Agent C, the final answer generator.",
+        user_content=prompt,
     )
-
-    return response.choices[0].message.content
+    return text

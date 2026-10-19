@@ -605,7 +605,7 @@ class ATBPPipeline:
         - Fallback to line-by-line decomposition if all else fails
         """
         prompt = PROMPTS["claim_extractor"].format(problem=problem, agent_a_output=agent_a_output)
-        raw = self.llm.call(prompt, temperature=0.0, seed=self.config.base_seed)
+        raw = self.llm.call(prompt, temperature=0.0)
         response_text = raw[0] if isinstance(raw, tuple) else raw
         usage_dict = raw[1] if isinstance(raw, tuple) else {}
         
@@ -616,7 +616,7 @@ class ATBPPipeline:
         data, parse_error = parse_json_safely(response_text)
         
         if parse_error:
-            logger.warning(f"Claim extraction JSON parse failed: {parse_error}. Using fallback.")
+            logger.warning(f"Claim extraction JSON parse failed: {parse_error}. Response preview: {response_text[:200]}. Using fallback.")
             data = None
         
         raw_claims = data.get("claims", []) if data else []

@@ -1,16 +1,4 @@
-from openai import OpenAI
-
-from config.config import (
-    MODEL_NAME,
-    MAX_TOKENS,
-)
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",
-    timeout=120.0
-)
+from src.llm_client import call_llm
 
 
 def regenerate_plan(problem):
@@ -35,26 +23,11 @@ Problem:
 Return only the reasoning plan.
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=0,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are Agent A, a mathematical "
-                    "planning and reasoning agent."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    text, _, _ = call_llm(
+        system_prompt="You are Agent A, a mathematical planning and reasoning agent.",
+        user_content=prompt,
     )
-
-    return response.choices[0].message.content
+    return text
 
 
 def repair_claim(
@@ -98,23 +71,8 @@ Do not solve the entire problem.
 Return only the corrected atomic claim.
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=0,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You repair individual mathematical "
-                    "reasoning claims."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    text, _, _ = call_llm(
+        system_prompt="You repair individual mathematical reasoning claims.",
+        user_content=prompt,
     )
-
-    return response.choices[0].message.content.strip()
+    return text.strip()

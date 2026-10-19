@@ -4,13 +4,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Ollama runs locally, so no OpenAI API key is required.
-API_KEY = "ollama"
+# ---------------------------------------------------------------------------
+# Backend selection
+# Set LLM_BACKEND to "gemini", "openai", or "ollama" for local.
+# ---------------------------------------------------------------------------
+LLM_BACKEND = "openai"   # "ollama" | "gemini" | "openai"
 
+# Ollama (local) settings
+API_KEY    = "ollama"
 MODEL_NAME = "qwen2.5:7b"
 
-MAX_TOKENS = 2048
+# Gemini settings
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL_NAME = "gemini-flash-latest"   # always resolves to latest available flash
 
+# OpenAI settings
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL_NAME = "gpt-4o-mini"   # gpt-4o-mini for cheap, gpt-4o for better
+
+MAX_TOKENS  = 2048
 TEMPERATURE = 0
 
 # Recovery strategy parameters

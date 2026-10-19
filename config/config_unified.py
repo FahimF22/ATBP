@@ -77,6 +77,7 @@ class ATBPConfig:
     # Generation parameters
     temps: list[float] = field(default_factory=lambda: [0.0, 0.7, 0.7])
     max_tokens: int = 2048
+    base_seed: int = 42  # Seed for reproducibility
 
 
 def _get_env_path() -> Path:
@@ -182,7 +183,8 @@ def get_config(
     max_regenerations: int = 3,
     max_repair_attempts: int = 2,
     temps: list[float] = None,
-    max_tokens: int = 2048
+    max_tokens: int = 2048,
+    base_seed: int = 42
 ) -> ATBPConfig:
     """
     Load and validate configuration from .env, auto-detecting LLM provider.
@@ -252,7 +254,8 @@ def get_config(
         max_regenerations=max_regenerations,
         max_repair_attempts=max_repair_attempts,
         temps=temps,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        base_seed=base_seed
     )
     
     logger.info(

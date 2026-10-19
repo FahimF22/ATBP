@@ -308,12 +308,12 @@ def run_a4_full(problem):
     try:
         b_output = agent_b(problem, final_plan)
     except Exception as e:
-        b_output = f"[Error in Agent B: {str(e)}]"
+        b_output = f"[Error in Agent B: {str(e)[:200]}]"
 
     try:
         c_output = agent_c(problem, final_plan, b_output)
     except Exception as e:
-        c_output = f"[Error in Agent C: {str(e)}]"
+        c_output = f"[Error in Agent C: {str(e)[:200]}]"
 
     latency = time.time() - start_time
 

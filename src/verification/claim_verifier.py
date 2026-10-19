@@ -1,16 +1,7 @@
 import json
 import re
 
-from openai import OpenAI
-
-from config.config import MODEL_NAME, MAX_TOKENS
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama",
-    timeout=120.0
-)
+from src.llm_client import call_llm
 
 
 def _extract_json(text):
@@ -113,26 +104,10 @@ Return ONLY this JSON format:
 Verification threshold: {tau}
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=0,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict mathematical "
-                    "claim verifier."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    raw, _, _ = call_llm(
+        system_prompt="You are a strict mathematical claim verifier.",
+        user_content=prompt,
     )
-
-    raw = response.choices[0].message.content
 
     result = _extract_json(raw)
 

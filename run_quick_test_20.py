@@ -2,7 +2,10 @@
 """Quick 20-example test with Qwen2.5:7b - A0 vs A4 only"""
 
 import sys
+import io
 sys.path.insert(0, '.')
+# Force UTF-8 output on Windows to avoid cp1252 UnicodeEncodeError
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 import time
 from pathlib import Path
@@ -77,9 +80,9 @@ def main():
             save_experiment(a0_result, filename=str(output_dir / "a0_baseline.jsonl"))
             results_a0.append(a0_result)
             
-            print("✓" if a0_correct else "✗", end=" | ")
+            print("OK" if a0_correct else "X", end=" | ")
         except Exception as e:
-            print(f"✗({str(e)[:10]})", end=" | ")
+            print(f"X({str(e)[:20]})", end=" | ")
         
         # A4
         print("A4: ", end="", flush=True)
@@ -94,9 +97,9 @@ def main():
             save_experiment(a4_result, filename=str(output_dir / "a4_adaptive_recovery.jsonl"))
             results_a4.append(a4_result)
             
-            print("✓" if a4_correct else "✗")
+            print("OK" if a4_correct else "X")
         except Exception as e:
-            print(f"✗({str(e)[:10]})")
+            print(f"X({str(e)[:20]})")
     
     # Summary
     print("\n" + "=" * 80)
