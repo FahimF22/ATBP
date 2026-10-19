@@ -205,39 +205,16 @@ def reconstruct_plan(
 # LLM adapter
 # ----------------------------------------------------------------------
 
+
 class LLMAdapter:
-    """
-    Thin adapter around the project's LLM.
-
-    Replace call() with the existing call_llm() function from
-    src.pipeline once your local project exposes that function.
-
-    Keeping this adapter here prevents recovery logic from becoming
-    coupled to Ollama/OpenAI/Groq/litellm.
-    """
 
     def __init__(self, model=None):
         self.model = model
 
-    def call(
-        self,
-        prompt: str,
-    ) -> str:
+    def call(self, prompt: str) -> str:
+        from src.pipeline import call_llm
+        return call_llm(prompt)
 
-        # ----------------------------------------------------------
-        # IMPORTANT:
-        # Replace this section with:
-        #
-        # from src.pipeline import call_llm
-        # return call_llm(prompt)
-        #
-        # if your pipeline exposes call_llm().
-        # ----------------------------------------------------------
-
-        raise NotImplementedError(
-            "Connect LLMAdapter.call() to "
-            "your existing call_llm() implementation."
-        )
 
 
 # ----------------------------------------------------------------------
