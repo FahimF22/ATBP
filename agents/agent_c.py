@@ -4,7 +4,8 @@ from config.config import API_KEY, MODEL_NAME, MAX_TOKENS, TEMPERATURE
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="ollama"
+    api_key="ollama",
+    timeout=180.0
 )
 
 
@@ -17,16 +18,12 @@ Your role is Final Answer Generator.
 Using the original problem and the intermediate reasoning
 from Agents A and B, produce the final answer.
 
-Give:
-1. A concise explanation.
-2. The final numerical answer.
+You MUST respond with EXACTLY this structure and nothing else:
+**Reasoning Summary:** [1-2 sentences explaining the solution]
+**Answer:** [ONLY the final numerical value — digits only, no units, no explanation]
 
-Do not mention the multi-agent system.
-
-IMPORTANT: Your final line MUST be exactly:
-**Answer:** [the single final numerical value, digits only, no units or explanation]
-
-Do not write anything after the Answer line.
+Do NOT include any calculations, alternatives, or additional text after the **Answer:** line.
+Do NOT mention the multi-agent system.
 
 Original problem:
 {problem}

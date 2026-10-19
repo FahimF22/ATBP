@@ -4,7 +4,8 @@ from config.config import MODEL_NAME, MAX_TOKENS, TEMPERATURE
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="ollama"
+    api_key="ollama",
+    timeout=180.0
 )
 
 
@@ -18,9 +19,11 @@ You receive:
 1. The original problem.
 2. The reasoning produced by Agent A.
 
-Use Agent A's reasoning as an input, check the calculations,
-continue the reasoning, and produce a solution that Agent C
-can use.
+Check Agent A's work for errors. If you find mistakes in calculation
+or logic, recompute correctly. Show your work step-by-step.
+
+Use Agent A's reasoning as a starting point, verify every calculation,
+continue the reasoning, and produce a solution that Agent C can use.
 
 Original problem:
 {problem}
