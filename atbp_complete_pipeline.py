@@ -25,6 +25,7 @@ import re
 import json
 import time
 import math
+import copy
 import argparse
 import logging
 from dataclasses import dataclass, field, asdict
@@ -1088,6 +1089,26 @@ class ATBPPipeline:
     # =================================================================
 
     def run_system(self, system_name: str, example_id: int, problem: str, gold_answer: Optional[float]) -> ExampleTrace:
+        """
+        Run a single system (A0, A2, A3, or A4) on one GSM8K example.
+        
+        This is the main entry point that orchestrates the pipeline:
+        1. Agent A: Generate reasoning plan
+        2. Claim Extraction: Decompose into atomic claims
+        3. Verification: Verify each claim with confidence scoring
+        4. Repair (if needed): Apply system-specific recovery strategy
+        5. Agent B: Execute calculations
+        6. Agent C: Synthesize final answer
+        
+        Args:
+            system_name: "A0", "A2", "A3", or "A4"
+            example_id: GSM8K example ID
+            problem: Problem statement
+            gold_answer: Gold answer for grading
+        
+        Returns:
+            ExampleTrace with all metrics (accuracy, repair stats, tokens, latency)
+        """
         self.reset_tokens()
         start_time = time.time()
 
@@ -1102,7 +1123,6 @@ class ATBPPipeline:
         )
 
         # ---- SYSTEM A0: Sequential Baseline (No Verification) ----
-
         if system_name == "A0":
             plan_text = self.run_agent_a(problem, temp=self.config.temps[0], seed=None)
             b_out = self.run_agent_b(problem, plan_text)
@@ -1114,11 +1134,9 @@ class ATBPPipeline:
             trace.is_correct = self.check_answer(pred, gold_answer)
             trace.latency_sec = time.time() - start_time
             trace.total_tokens = self.total_tokens
-
             return trace
 
-        # Initial Agent A Generation + Claim Extraction + Verification (Shared protocol for A2, A3, A4)
-
+        # ---- Shared prefix: Agent A + Claim Extraction + Verification (for A2, A3, A4) ----
         initial_plan = self.run_agent_a(problem, temp=self.config.temps[0], seed=None)
         graph = self.extract_claims(problem, initial_plan)
         all_ok = self.verify_all_claims(problem, graph)
@@ -1127,11 +1145,10 @@ class ATBPPipeline:
         trace.initial_detected_fault = not all_ok
 
         # ---- SYSTEM A2: Verify + Full Regeneration of Agent A ----
-
         if system_name == "A2":
             if not all_ok:
                 trace.correct_units_exposed = initial_valid_count
-                trace.correct_units_altered = initial_valid_count  # Full regeneration discards 100% of exposed valid claims
+                trace.correct_units_altered = initial_valid_count  # Full regeneration discards 100% of exposed valid
 
                 accepted_plan = False
                 for attempt in range(1, self.config.max_regenerations + 1):
@@ -1151,7 +1168,7 @@ class ATBPPipeline:
                         break
 
                 if not accepted_plan:
-                    # All regenerations failed verification -> produces "No answer" (counted as incorrect)
+                    # All regenerations failed
                     trace.predicted_answer = None
                     trace.has_answer = False
                     trace.is_correct = False
@@ -1169,15 +1186,13 @@ class ATBPPipeline:
             trace.is_correct = self.check_answer(pred, gold_answer)
             trace.latency_sec = time.time() - start_time
             trace.total_tokens = self.total_tokens
-
             return trace
 
         # ---- SYSTEM A3: Verify + Fixed Isolated Claim Repair ----
-
         if system_name == "A3":
             if not all_ok:
                 trace.correct_units_exposed = initial_valid_count
-                trace.correct_units_altered = 0  # Isolated repair never alters already-accepted claims (CDR = 0%)
+                trace.correct_units_altered = 0  # Isolated repair never alters already-accepted claims
 
                 faulty_ids = [cid for cid in graph.order if not graph.claims[cid].accepted]
 
@@ -1199,11 +1214,9 @@ class ATBPPipeline:
             trace.is_correct = self.check_answer(pred, gold_answer)
             trace.latency_sec = time.time() - start_time
             trace.total_tokens = self.total_tokens
-
             return trace
 
         # ---- SYSTEM A4: ATBP (Adaptive Recovery Scope Selection) ----
-
         if system_name == "A4":
             if not all_ok:
                 trace.correct_units_exposed = initial_valid_count
@@ -1214,7 +1227,7 @@ class ATBPPipeline:
 
                 for f_cid in faulty_ids:
                     if f_cid in graph.claims and graph.claims[f_cid].accepted:
-                        continue  # Already fixed by an earlier branch/agent repair
+                        continue  # Already fixed by earlier repair
 
                     current_faults = [c for c in graph.order if not graph.claims[c].accepted]
                     if not current_faults:
@@ -1268,10 +1281,188 @@ class ATBPPipeline:
             trace.is_correct = self.check_answer(pred, gold_answer)
             trace.latency_sec = time.time() - start_time
             trace.total_tokens = self.total_tokens
-
             return trace
 
         raise ValueError(f"Unknown system variant: {system_name}")
+
+    def run_system_with_prefix(self, system_name: str, example_id: int, problem: str, 
+                              gold_answer: Optional[float], prefix_graph: DependencyGraph,
+                              prefix_tokens: int, prefix_latency: float, 
+                              prefix_all_ok: bool, shared_bc_result: Optional[Dict] = None) -> ExampleTrace:
+        """
+        Run A2/A3/A4 with shared prefix (Agent A + Claim Extraction + Verification).
+        
+        For clean path (no faults): uses shared_bc_result if provided.
+        For faulty path: uses deepcopy of prefix_graph for independent repair.
+        
+        Args:
+            system_name: System identifier (A2, A3, A4)
+            example_id: Example ID
+            problem: Problem statement
+            gold_answer: Gold answer for grading
+            prefix_graph: Verified DependencyGraph from shared prefix
+            prefix_tokens: Token cost of shared prefix execution
+            prefix_latency: Latency cost of shared prefix execution
+            prefix_all_ok: Whether all claims in prefix_graph are valid
+            shared_bc_result: Optional cached B→C result for clean path
+        
+        Returns:
+            ExampleTrace with complete metrics including shared prefix costs
+        """
+        self.reset_tokens()
+        start_time = time.time()
+        
+        trace = ExampleTrace(
+            example_id=example_id,
+            system=system_name,
+            question=problem,
+            gold_answer=gold_answer,
+            predicted_answer=None,
+            is_correct=False,
+            has_answer=False
+        )
+        
+        # Add shared prefix costs upfront
+        self.total_tokens = prefix_tokens
+        
+        # Mark initial fault detection
+        trace.initial_detected_fault = not prefix_all_ok
+        
+        # Clean path: all claims verified, no faults
+        if prefix_all_ok:
+            # Use shared B→C result if available, otherwise run independently
+            if shared_bc_result:
+                b_out = shared_bc_result["b_out"]
+                c_out = shared_bc_result["c_out"]
+                # Add B→C token cost to this system
+                self.total_tokens += shared_bc_result.get("bc_tokens", 0)
+            else:
+                plan_text = prefix_graph.to_plan_text()
+                b_out = self.run_agent_b(problem, plan_text)
+                c_out = self.run_agent_c(problem, plan_text, b_out)
+            
+            pred = self.extract_final_number(c_out)
+            trace.predicted_answer = pred
+            trace.has_answer = pred is not None
+            trace.is_correct = self.check_answer(pred, gold_answer)
+            trace.latency_sec = (time.time() - start_time) + prefix_latency
+            trace.total_tokens = self.total_tokens
+            return trace
+        
+        # Faulty path: use deepcopy for independent repair strategy
+        graph = copy.deepcopy(prefix_graph)
+        initial_valid_count = sum(1 for cid in graph.order if graph.claims[cid].accepted)
+        trace.correct_units_exposed = initial_valid_count
+        
+        # ---- SYSTEM A2: Verify + Full Regeneration of Agent A ----
+        if system_name == "A2":
+            trace.correct_units_altered = initial_valid_count  # Full regeneration discards 100% of exposed valid
+            
+            accepted_plan = False
+            for attempt in range(1, self.config.max_regenerations + 1):
+                trace.repair_attempts += 1
+                trace.selected_scopes.append("R_full")
+                
+                regen_plan = self.run_agent_a(
+                    problem,
+                    temp=self.config.temps[min(attempt, len(self.config.temps) - 1)],
+                    seed=None
+                )
+                
+                graph = self.extract_claims(problem, regen_plan)
+                if self.verify_all_claims(problem, graph):
+                    trace.successful_repairs += 1
+                    accepted_plan = True
+                    break
+            
+            if not accepted_plan:
+                trace.predicted_answer = None
+                trace.has_answer = False
+                trace.is_correct = False
+                trace.latency_sec = (time.time() - start_time) + prefix_latency
+                trace.total_tokens = self.total_tokens
+                return trace
+        
+        # ---- SYSTEM A3: Verify + Fixed Isolated Claim Repair ----
+        elif system_name == "A3":
+            trace.correct_units_altered = 0  # Isolated repair never alters already-accepted claims
+            
+            faulty_ids = [cid for cid in graph.order if not graph.claims[cid].accepted]
+            
+            for f_cid in faulty_ids:
+                trace.repair_attempts += 1
+                trace.selected_scopes.append("R_claim")
+                
+                success, attempt, tokens = self.repair_isolated_claim(problem, graph, f_cid)
+                if success:
+                    trace.successful_repairs += 1
+        
+        # ---- SYSTEM A4: ATBP (Adaptive Recovery Scope Selection) ----
+        elif system_name == "A4":
+            altered_valid_ids: Set[str] = set()
+            initial_accepted_ids: Set[str] = {cid for cid in graph.order if graph.claims[cid].accepted}
+            
+            faulty_ids = [cid for cid in graph.order if not graph.claims[cid].accepted]
+            
+            for f_cid in faulty_ids:
+                if f_cid in graph.claims and graph.claims[f_cid].accepted:
+                    continue  # Already fixed
+                
+                current_faults = [c for c in graph.order if not graph.claims[c].accepted]
+                if not current_faults:
+                    break
+                
+                scope = self.select_recovery_scope(graph, f_cid, len(current_faults))
+                trace.selected_scopes.append(scope)
+                
+                if scope == "R_claim":
+                    trace.repair_attempts += 1
+                    success, attempt, tokens = self.repair_isolated_claim(problem, graph, f_cid)
+                    if success:
+                        trace.successful_repairs += 1
+                
+                elif scope == "R_branch":
+                    trace.repair_attempts += 1
+                    down_valid = {d for d in graph.get_downstream(f_cid) if d in initial_accepted_ids}
+                    altered_valid_ids.update(down_valid)
+                    
+                    branch_ok, valid_rewritten, tokens, tier_used = self.repair_dependency_branch(problem, graph, f_cid)
+                    if branch_ok:
+                        trace.successful_repairs += 1
+                
+                elif scope in ("R_agent", "R_full"):
+                    altered_valid_ids.update(initial_accepted_ids)
+                    for attempt in range(1, self.config.max_regenerations + 1):
+                        trace.repair_attempts += 1
+                        
+                        regen_plan = self.run_agent_a(
+                            problem,
+                            temp=self.config.temps[min(attempt, len(self.config.temps) - 1)],
+                            seed=None
+                        )
+                        
+                        graph = self.extract_claims(problem, regen_plan)
+                        if self.verify_all_claims(problem, graph):
+                            trace.successful_repairs += 1
+                            break
+                    
+                    break
+            
+            trace.correct_units_altered = min(len(altered_valid_ids), trace.correct_units_exposed)
+        
+        # Complete B→C pipeline
+        plan_text = graph.to_plan_text()
+        b_out = self.run_agent_b(problem, plan_text)
+        c_out = self.run_agent_c(problem, plan_text, b_out)
+        pred = self.extract_final_number(c_out)
+        
+        trace.predicted_answer = pred
+        trace.has_answer = pred is not None
+        trace.is_correct = self.check_answer(pred, gold_answer)
+        trace.latency_sec = (time.time() - start_time) + prefix_latency
+        trace.total_tokens = self.total_tokens
+        
+        return trace
 
     # --- Answer Extraction & Grading Utilities ---
 
