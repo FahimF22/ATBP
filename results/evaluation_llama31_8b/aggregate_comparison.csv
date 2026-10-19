@@ -1,0 +1,5 @@
+Strategy,Accuracy,Correct_Count,Total_Count,Mean_Latency_Seconds,Min_Latency_Seconds,Max_Latency_Seconds,Median_Latency_Seconds
+A0_Baseline,63.64%,7,11,19.92,14.25,29.18,18.92
+A2_Full_Regeneration,63.64%,7,11,45.1,31.74,56.48,43.38
+A3_Targeted_Repair,72.73%,8,11,39.8,31.74,49.85,39.77
+A4_Adaptive_Recovery,72.73%,8,11,39.77,31.74,49.85,39.77
