@@ -30,6 +30,10 @@ Usage:
 
 import logging
 import time
+import sqlite3
+import hashlib
+import threading
+import json
 from typing import Tuple, Dict, Optional
 from dataclasses import dataclass
 
@@ -84,9 +88,19 @@ class LLMClient:
             api_key=self.config.api_key if self.config.api_key else "ollama",
             timeout=180.0,
         )
+        
+        # Initialize cache
+        self._cache_enabled = self.config.caching_enabled
+        self._cache_db_path = ".atbp_llm_cache.sqlite"
+        self._cache_lock = threading.Lock()
+        
+        if self._cache_enabled:
+            self._init_cache_db()
+        
         logger.info(
             f"LLMClient initialized for {self.config.api_provider} "
-            f"({self.config.model}) at {self.config.base_url}"
+            f"({self.config.model}) at {self.config.base_url} | "
+            f"Cache: {'enabled' if self._cache_enabled else 'disabled'}"
         )
     
     def _estimate_tokens(self, text: str) -> int:
@@ -104,6 +118,118 @@ class LLMClient:
         """
         words = len(text.split())
         return max(1, int(words * 1.3))
+    
+    def _init_cache_db(self) -> None:
+        """Initialize SQLite cache database if not already initialized."""
+        try:
+            conn = sqlite3.connect(self._cache_db_path, timeout=10.0, check_same_thread=False)
+            cursor = conn.cursor()
+            
+            # Create cache table if not exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS llm_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    api_provider TEXT,
+                    model TEXT,
+                    response_text TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.commit()
+            conn.close()
+            
+            logger.debug(f"Cache database initialized: {self._cache_db_path}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize cache database: {e}. Caching disabled.")
+            self._cache_enabled = False
+    
+    def _compute_cache_key(self, prompt: str, temperature: float, max_tokens: int, seed: Optional[int]) -> str:
+        """
+        Compute deterministic SHA-256 cache key from inputs.
+        
+        Components: provider, model, prompt, temperature, max_tokens, seed
+        All components are included so identical inputs produce identical keys.
+        
+        Args:
+            prompt (str): The prompt text
+            temperature (float): Temperature setting
+            max_tokens (int): Max tokens setting
+            seed (Optional[int]): Random seed (or None)
+        
+        Returns:
+            str: SHA-256 hex digest for cache key
+        """
+        key_data = f"{self.config.api_provider}|{self.config.model}|{prompt}|{temperature}|{max_tokens}|{seed or 'none'}"
+        return hashlib.sha256(key_data.encode("utf-8")).hexdigest()
+    
+    def _get_cached_response(self, cache_key: str) -> Optional[Tuple[str, Dict[str, int]]]:
+        """
+        Retrieve cached response if available.
+        
+        Args:
+            cache_key (str): Cache key computed from inputs
+        
+        Returns:
+            Tuple[response_text, usage_dict] if found, None otherwise
+        """
+        if not self._cache_enabled:
+            return None
+        
+        try:
+            with self._cache_lock:
+                conn = sqlite3.connect(self._cache_db_path, timeout=10.0, check_same_thread=False)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT response_text, prompt_tokens, completion_tokens
+                    FROM llm_cache
+                    WHERE cache_key = ?
+                """, (cache_key,))
+                
+                row = cursor.fetchone()
+                conn.close()
+                
+                if row:
+                    response_text, prompt_tokens, completion_tokens = row
+                    usage_dict = {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens
+                    }
+                    logger.debug(f"Cache hit for key {cache_key[:8]}...")
+                    return response_text, usage_dict
+                
+                return None
+        except Exception as e:
+            logger.warning(f"Cache retrieval error: {e}")
+            return None
+    
+    def _store_cached_response(self, cache_key: str, response_text: str, 
+                              prompt_tokens: int, completion_tokens: int) -> None:
+        """Store response in cache."""
+        if not self._cache_enabled:
+            return
+        
+        try:
+            with self._cache_lock:
+                conn = sqlite3.connect(self._cache_db_path, timeout=10.0, check_same_thread=False)
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO llm_cache 
+                    (cache_key, api_provider, model, response_text, prompt_tokens, completion_tokens)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (cache_key, self.config.api_provider, self.config.model, 
+                      response_text, prompt_tokens, completion_tokens))
+                
+                conn.commit()
+                conn.close()
+                
+                logger.debug(f"Cached response for key {cache_key[:8]}...")
+        except Exception as e:
+            logger.warning(f"Cache storage error: {e}")
     
     def _get_usage_dict(
         self,
@@ -158,7 +284,10 @@ class LLMClient:
         seed: int = None,
     ) -> Tuple[str, Dict[str, int]]:
         """
-        Call the LLM with retry logic and exponential backoff.
+        Call the LLM with caching, retry logic and exponential backoff.
+        
+        Attempts cache retrieval first. On cache miss, makes API call with retries,
+        stores result, and returns.
         
         Automatically retries on transient errors (rate limits, connection issues)
         with exponential backoff: 2s, 4s, 8s. Logs each retry attempt and full
@@ -203,6 +332,16 @@ class LLMClient:
             - Other exceptions (auth, validation) → raise immediately
             - After max retries, raises the original exception with full context
         """
+        # Compute cache key
+        cache_key = self._compute_cache_key(prompt, temperature, max_tokens, seed)
+        
+        # Check cache
+        cached_result = self._get_cached_response(cache_key)
+        if cached_result is not None:
+            response_text, usage_dict = cached_result
+            return response_text, usage_dict
+        
+        # Cache miss; proceed with API call
         if system_prompt is None:
             system_prompt = ""
         
@@ -244,6 +383,13 @@ class LLMClient:
                     response_text,
                     full_prompt,
                     response.usage
+                )
+                
+                # Store in cache BEFORE returning
+                self._store_cached_response(
+                    cache_key, response_text,
+                    usage_dict.get("prompt_tokens", 0),
+                    usage_dict.get("completion_tokens", 0)
                 )
                 
                 logger.debug(

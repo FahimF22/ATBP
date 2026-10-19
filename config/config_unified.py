@@ -78,6 +78,9 @@ class ATBPConfig:
     temps: list[float] = field(default_factory=lambda: [0.0, 0.7, 0.7])
     max_tokens: int = 2048
     base_seed: int = 42  # Seed for reproducibility
+    
+    # Caching parameters
+    caching_enabled: bool = True  # Enable/disable deterministic disk caching
 
 
 def _get_env_path() -> Path:
@@ -184,7 +187,8 @@ def get_config(
     max_repair_attempts: int = 2,
     temps: list[float] = None,
     max_tokens: int = 2048,
-    base_seed: int = 42
+    base_seed: int = 42,
+    caching_enabled: bool = True
 ) -> ATBPConfig:
     """
     Load and validate configuration from .env, auto-detecting LLM provider.
@@ -203,6 +207,7 @@ def get_config(
         temps (list[float], optional): Temperature schedule for regenerations.
             Default: [0.0, 0.7, 0.7] (initial=deterministic, recoveries=stochastic)
         max_tokens (int): Maximum output tokens per LLM call. Default: 2048
+        caching_enabled (bool): Enable deterministic disk caching in LLMClient. Default: True
     
     Returns:
         ATBPConfig: Fully configured object with provider, API key, base URL, model, and parameters
@@ -255,13 +260,14 @@ def get_config(
         max_repair_attempts=max_repair_attempts,
         temps=temps,
         max_tokens=max_tokens,
-        base_seed=base_seed
+        base_seed=base_seed,
+        caching_enabled=caching_enabled
     )
     
     logger.info(
         f"Configuration loaded: provider={config.api_provider}, "
         f"model={config.model}, tau={config.tau}, "
-        f"max_tokens={config.max_tokens}"
+        f"max_tokens={config.max_tokens}, caching={'enabled' if config.caching_enabled else 'disabled'}"
     )
     
     return config
