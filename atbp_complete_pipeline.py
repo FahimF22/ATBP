@@ -118,6 +118,43 @@ Target Claim to Verify:
 ID: {claim_id}
 Claim: {claim_text}""",
 
+    "claim_verifier_batch": """You are a Mathematical Claim Verifier.
+
+Evaluate whether each Target Claim is logically and arithmetically valid given the Original Problem and the list of prerequisite claims.
+
+For each claim, verify:
+1. Factual accuracy against the problem statement.
+2. Arithmetic correctness.
+3. Logical consistency with prerequisite claims.
+
+Respond ONLY with valid JSON in this exact format:
+
+{
+  "verifications": [
+    {
+      "claim_id": "c1",
+      "valid": true,
+      "confidence": 0.95,
+      "reason": "<brief 1-sentence explanation>"
+    },
+    {
+      "claim_id": "c2",
+      "valid": false,
+      "confidence": 0.85,
+      "reason": "<brief 1-sentence explanation>"
+    }
+  ]
+}
+
+Original Problem:
+{problem}
+
+Prerequisite Claims Context (each claim with its prerequisites):
+{prerequisite_claims_text}
+
+Claims to Verify:
+{claims_to_verify}""",
+
     "isolated_claim_repair": """You are an Isolated Claim Repair module.
 
 A specific claim in a mathematical reasoning plan failed verification. Rewrite ONLY the faulty claim so that it is mathematically and logically correct based on the problem statement and its prerequisite claims.
@@ -694,12 +731,112 @@ class ATBPPipeline:
 
         return claim
 
-    def verify_all_claims(self, problem: str, graph: DependencyGraph) -> bool:
+    def verify_claims_batch(self, problem: str, graph: DependencyGraph, claim_ids: List[str]) -> Tuple[bool, int]:
+        """
+        Batch verify multiple claims in a single LLM call.
+        
+        Sends all claims to be verified in one API call with a structured prompt.
+        Falls back to single-claim verification if batch JSON parsing fails.
+        
+        Args:
+            problem: Original problem statement
+            graph: DependencyGraph with claims
+            claim_ids: List of claim IDs to verify
+        
+        Returns:
+            Tuple[all_accepted, tokens_used]:
+                - all_accepted: True if all claims pass verification threshold
+                - tokens_used: Total tokens consumed (batch call + any fallback)
+        """
+        if not claim_ids:
+            return True, 0
+        
+        # Build prerequisite context for all claims
+        prerequisite_context = []
+        for cid in claim_ids:
+            prereq_ids = graph.get_prerequisites(cid)
+            if prereq_ids:
+                prereq_text = "; ".join(f"[{pid}] {graph.claims[pid].text}" for pid in prereq_ids)
+            else:
+                prereq_text = "None (from problem statement)"
+            prerequisite_context.append(f"[{cid}] Prerequisites: {prereq_text}")
+        
+        # Build claims to verify list
+        claims_to_verify = "\n".join(
+            f"- [{cid}] {graph.claims[cid].text}" for cid in claim_ids
+        )
+        
+        # Build batch verification prompt
+        prompt = (PROMPTS["claim_verifier_batch"]
+                 .replace("{problem}", problem)
+                 .replace("{prerequisite_claims_text}", "\n".join(prerequisite_context))
+                 .replace("{claims_to_verify}", claims_to_verify))
+        
+        # Call LLM
+        response_text, usage_dict = self.llm.call(prompt, temperature=0.0, max_tokens=self.config.max_tokens)
+        self._track_tokens(usage_dict)
+        total_tokens = usage_dict.get("prompt_tokens", 0) + usage_dict.get("completion_tokens", 0)
+        
+        # Parse batch response
+        data, parse_error = parse_json_safely(response_text)
+        
+        if parse_error or data is None:
+            logger.warning(f"Batch verification JSON parse failed: {parse_error}. Falling back to single-claim verification.")
+            # Fallback: run single-claim verification for each claim
+            all_accepted = True
+            for cid in claim_ids:
+                claim = self.verify_claim(problem, graph, cid)
+                if not claim.accepted:
+                    all_accepted = False
+            return all_accepted, total_tokens
+        
+        # Extract verifications from batch response
+        verifications = data.get("verifications", [])
+        if not isinstance(verifications, list):
+            logger.warning("Batch response 'verifications' is not a list. Falling back to single-claim verification.")
+            all_accepted = True
+            for cid in claim_ids:
+                claim = self.verify_claim(problem, graph, cid)
+                if not claim.accepted:
+                    all_accepted = False
+            return all_accepted, total_tokens
+        
+        # Process batch results
         all_accepted = True
-        for cid in graph.order:
-            c = self.verify_claim(problem, graph, cid)
-            if not c.accepted:
+        for verification in verifications:
+            if not isinstance(verification, dict):
+                logger.warning("Verification item is not a dict; skipping")
+                continue
+            
+            cid = str(verification.get("claim_id", ""))
+            if cid not in graph.claims:
+                logger.warning(f"Verification references unknown claim {cid}")
+                continue
+            
+            claim = graph.claims[cid]
+            claim.valid = bool(verification.get("valid", False))
+            try:
+                claim.confidence = float(verification.get("confidence", 0.0))
+            except (ValueError, TypeError):
+                claim.confidence = 0.0
+            claim.confidence = max(0.0, min(1.0, claim.confidence))
+            claim.reason = str(verification.get("reason", "Batch verification"))
+            claim.accepted = (claim.valid is True) and (claim.confidence >= self.config.tau)
+            
+            if not claim.accepted:
                 all_accepted = False
+        
+        logger.debug(f"Batch verification completed: {len(verifications)} claims processed")
+        return all_accepted, total_tokens
+
+    def verify_all_claims(self, problem: str, graph: DependencyGraph) -> bool:
+        """
+        Verify all claims using batch verification (with single-claim fallback).
+        
+        Attempts batch verification for efficiency. If batch parsing fails,
+        gracefully falls back to single-claim verification to maintain reliability.
+        """
+        all_accepted, _ = self.verify_claims_batch(problem, graph, graph.order)
         return all_accepted
 
     # --- Targeted Repair Operations ---
