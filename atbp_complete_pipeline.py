@@ -121,39 +121,26 @@ Claim: {claim_text}""",
 
     "claim_verifier_batch": """You are a Mathematical Claim Verifier.
 
-Evaluate whether each Target Claim is logically and arithmetically valid given the Original Problem and the list of prerequisite claims.
+Evaluate whether each Target Claim is logically and arithmetically valid given the Original Problem.
 
 For each claim, verify:
 1. Factual accuracy against the problem statement.
 2. Arithmetic correctness.
 3. Logical consistency with prerequisite claims.
 
-Respond ONLY with valid JSON in this exact format:
+You MUST respond ONLY with valid JSON in this EXACT format - no other text before or after:
 
 {
   "verifications": [
-    {
-      "claim_id": "c1",
-      "valid": true,
-      "confidence": 0.95,
-      "reason": "<brief 1-sentence explanation>"
-    },
-    {
-      "claim_id": "c2",
-      "valid": false,
-      "confidence": 0.85,
-      "reason": "<brief 1-sentence explanation>"
-    }
+    {"claim_id": "c1", "valid": true, "confidence": 0.95, "reason": "Brief explanation"},
+    {"claim_id": "c2", "valid": false, "confidence": 0.85, "reason": "Brief explanation"}
   ]
 }
 
 Original Problem:
 {problem}
 
-Prerequisite Claims Context (each claim with its prerequisites):
-{prerequisite_claims_text}
-
-Claims to Verify:
+Claims to Verify (with their prerequisites):
 {claims_to_verify}""",
 
     "isolated_claim_repair": """You are an Isolated Claim Repair module.
@@ -752,25 +739,21 @@ class ATBPPipeline:
         if not claim_ids:
             return True, 0
         
-        # Build prerequisite context for all claims
-        prerequisite_context = []
+        # Build claims to verify with their prerequisites inline
+        claims_to_verify_lines = []
         for cid in claim_ids:
             prereq_ids = graph.get_prerequisites(cid)
             if prereq_ids:
-                prereq_text = "; ".join(f"[{pid}] {graph.claims[pid].text}" for pid in prereq_ids)
+                prereq_str = ", ".join(f"[{p}]" for p in prereq_ids)
+                claims_to_verify_lines.append(f"[{cid}] {graph.claims[cid].text}\n     (Prerequisites: {prereq_str})")
             else:
-                prereq_text = "None (from problem statement)"
-            prerequisite_context.append(f"[{cid}] Prerequisites: {prereq_text}")
+                claims_to_verify_lines.append(f"[{cid}] {graph.claims[cid].text}\n     (No prerequisites)")
         
-        # Build claims to verify list
-        claims_to_verify = "\n".join(
-            f"- [{cid}] {graph.claims[cid].text}" for cid in claim_ids
-        )
+        claims_to_verify = "\n".join(claims_to_verify_lines)
         
         # Build batch verification prompt
         prompt = (PROMPTS["claim_verifier_batch"]
                  .replace("{problem}", problem)
-                 .replace("{prerequisite_claims_text}", "\n".join(prerequisite_context))
                  .replace("{claims_to_verify}", claims_to_verify))
         
         # Call LLM
@@ -804,6 +787,7 @@ class ATBPPipeline:
         
         # Process batch results
         all_accepted = True
+        verified_count = 0
         for verification in verifications:
             if not isinstance(verification, dict):
                 logger.warning("Verification item is not a dict; skipping")
@@ -823,11 +807,12 @@ class ATBPPipeline:
             claim.confidence = max(0.0, min(1.0, claim.confidence))
             claim.reason = str(verification.get("reason", "Batch verification"))
             claim.accepted = (claim.valid is True) and (claim.confidence >= self.config.tau)
+            verified_count += 1
             
             if not claim.accepted:
                 all_accepted = False
         
-        logger.debug(f"Batch verification completed: {len(verifications)} claims processed")
+        logger.debug(f"Batch verification completed: {verified_count} claims verified out of {len(claim_ids)}")
         return all_accepted, total_tokens
 
     def verify_all_claims(self, problem: str, graph: DependencyGraph) -> bool:
