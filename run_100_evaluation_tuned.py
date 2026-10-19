@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 """
-100-Example Evaluation with Parameter Tuning for GPT-3.5-Turbo
+100-Example Evaluation with Parameter Tuning for GPT-4O-Mini
 =============================================================
 
-Goal: Achieve ~90% accuracy with gpt-3.5-turbo by tuning verification parameters.
+Goal: Achieve ~90% accuracy with gpt-4o-mini by tuning verification parameters.
 
 Tuned Parameters:
-  - VERIFICATION_THRESHOLD=0.75 (more lenient verification - original: 0.80)
+  - VERIFICATION_THRESHOLD=0.75 (more lenient verification - original: 0.75)
   - MAX_REGENERATIONS=5 (more retry attempts - original: 2)
   - MAX_REPAIR_ATTEMPTS=3 (more targeted repairs - original: 2)
   
 Strategy: A4 (Adaptive Targeted Backtracking)
-Model: gpt-3.5-turbo
+Model: gpt-4o-mini
 Dataset: GSM8K test set (100 examples)
 """
 
@@ -31,7 +31,7 @@ import config.config as cfg
 cfg.VERIFICATION_THRESHOLD = 0.75
 cfg.MAX_REGENERATIONS = 5
 cfg.MAX_REPAIR_ATTEMPTS = 3
-cfg.OPENAI_MODEL_NAME = "gpt-3.5-turbo"
+cfg.OPENAI_MODEL_NAME = "gpt-4o-mini"
 
 from experiments.run_a4_full import run_a4_full
 from evaluation.gsm8k_evaluator import evaluate_answer
@@ -69,7 +69,7 @@ def main():
     print("  VERIFICATION_THRESHOLD (τ):       0.75 (original: 0.75)")
     print("  MAX_REGENERATIONS:                5 (original: 2)")
     print("  MAX_REPAIR_ATTEMPTS:              3 (original: 2)")
-    print("  Model:                            gpt-3.5-turbo")
+    print("  Model:                            gpt-4o-mini")
     print("  Dataset:                          GSM8K test set (n=100)")
     print("=" * 80)
     
