@@ -572,21 +572,24 @@ class ATBPPipeline:
 
     def run_agent_a(self, problem: str, temp: float = 0.0, seed: Optional[int] = None) -> str:
         """Run Agent A with temperature and optional seed for reproducibility."""
-        prompt = PROMPTS["agent_a"].format(problem=problem)
+        prompt = PROMPTS["agent_a"].replace("{problem}", problem)
         response_text, usage_dict = self.llm.call(prompt, temperature=temp, max_tokens=self.config.max_tokens, seed=seed)
         self._track_tokens(usage_dict)
         return response_text
 
     def run_agent_b(self, problem: str, plan_text: str) -> str:
         """Run Agent B to execute the plan with calculations."""
-        prompt = PROMPTS["agent_b"].format(problem=problem, plan_text=plan_text)
+        prompt = PROMPTS["agent_b"].replace("{problem}", problem).replace("{plan_text}", plan_text)
         response_text, usage_dict = self.llm.call(prompt, temperature=self.config.temps[0], max_tokens=self.config.max_tokens)
         self._track_tokens(usage_dict)
         return response_text
 
     def run_agent_c(self, problem: str, plan_text: str, agent_b_output: str) -> str:
         """Run Agent C to synthesize the final answer."""
-        prompt = PROMPTS["agent_c"].format(problem=problem, plan_text=plan_text, agent_b_output=agent_b_output)
+        prompt = (PROMPTS["agent_c"]
+                 .replace("{problem}", problem)
+                 .replace("{plan_text}", plan_text)
+                 .replace("{agent_b_output}", agent_b_output))
         response_text, usage_dict = self.llm.call(prompt, temperature=self.config.temps[0], max_tokens=self.config.max_tokens)
         self._track_tokens(usage_dict)
         return response_text
@@ -604,7 +607,10 @@ class ATBPPipeline:
         - JSON parsing errors with markdown code blocks
         - Fallback to line-by-line decomposition if all else fails
         """
-        prompt = PROMPTS["claim_extractor"].format(problem=problem, agent_a_output=agent_a_output)
+        # Use replace instead of format to avoid issues with curly braces in agent_a_output
+        prompt_template = PROMPTS["claim_extractor"]
+        prompt = prompt_template.replace("{problem}", problem).replace("{agent_a_output}", agent_a_output)
+        
         raw = self.llm.call(prompt, temperature=0.0)
         response_text = raw[0] if isinstance(raw, tuple) else raw
         usage_dict = raw[1] if isinstance(raw, tuple) else {}
@@ -655,12 +661,12 @@ class ATBPPipeline:
         else:
             prereq_text = "None (derived directly from problem statement)."
 
-        prompt = PROMPTS["claim_verifier"].format(
-            problem=problem,
-            prerequisite_claims_text=prereq_text,
-            claim_id=cid,
-            claim_text=claim.text
-        )
+        prompt_template = PROMPTS["claim_verifier"]
+        prompt = (prompt_template
+                 .replace("{problem}", problem)
+                 .replace("{prerequisite_claims_text}", prereq_text)
+                 .replace("{claim_id}", cid)
+                 .replace("{claim_text}", claim.text))
 
         response_text, usage_dict = self.llm.call(prompt, temperature=0.0, max_tokens=self.config.max_tokens)
         self._track_tokens(usage_dict)
@@ -733,13 +739,12 @@ class ATBPPipeline:
             # Different seed per attempt for diversity
             seed = self.config.base_seed + attempt
             
-            prompt = PROMPTS["isolated_claim_repair"].format(
-                problem=problem,
-                prerequisite_claims=prereq_text,
-                claim_id=cid,
-                faulty_claim_text=claim.text,
-                verifier_reason=claim.reason
-            )
+            prompt = (PROMPTS["isolated_claim_repair"]
+                     .replace("{problem}", problem)
+                     .replace("{prerequisite_claims}", prereq_text)
+                     .replace("{claim_id}", cid)
+                     .replace("{faulty_claim_text}", claim.text)
+                     .replace("{verifier_reason}", claim.reason))
             
             response_text, usage_dict = self.llm.call(
                 prompt,
@@ -818,12 +823,11 @@ class ATBPPipeline:
         # Save original texts in case we need to revert
         original_texts = {cid: graph.claims[cid].text for cid in branch_ids}
         
-        prompt = PROMPTS["branch_repair"].format(
-            problem=problem,
-            unaffected_claims=unaffected_text,
-            faulty_claim_and_reason=faulty_info,
-            downstream_claims_list=downstream_list_text
-        )
+        prompt = (PROMPTS["branch_repair"]
+                 .replace("{problem}", problem)
+                 .replace("{unaffected_claims}", unaffected_text)
+                 .replace("{faulty_claim_and_reason}", faulty_info)
+                 .replace("{downstream_claims_list}", downstream_list_text))
         
         response_text, usage_dict = self.llm.call(
             prompt,
@@ -872,7 +876,7 @@ class ATBPPipeline:
             seed = self.config.base_seed + 100 + attempt
             
             # Regenerate entire Agent A output
-            regen_prompt = PROMPTS["agent_a"].format(problem=problem)
+            regen_prompt = PROMPTS["agent_a"].replace("{problem}", problem)
             regen_response, regen_usage = self.llm.call(
                 regen_prompt,
                 temperature=temperature,
@@ -1405,7 +1409,7 @@ def main():
                     f"Latency: {trace.latency_sec:.1f}s | Tokens: {trace.total_tokens}"
                 )
             except Exception as e:
-                logger.error(f"[{sys_name}] Error on example {ex_id}: {e}")
+                logger.error(f"[{sys_name}] Error on example {ex_id}: {e}", exc_info=True)
 
     summaries = [summarize_system_metrics(s, all_traces[s]) for s in systems]
 
