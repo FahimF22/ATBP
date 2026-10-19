@@ -38,7 +38,7 @@ STRATEGY = "a3_targeted_repair"
 
 def reconstruct_plan(claims):
     """Reconstruct plan from verified/repaired claims."""
-    return "\n".join(c.get("text", "") for c in claims if c.get("text"))
+    return "\n\n".join(c.get("text", "") for c in claims if c.get("text"))
 
 
 def run_a3_full(problem):

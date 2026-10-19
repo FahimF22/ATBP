@@ -42,7 +42,7 @@ STRATEGY = "a4_adaptive_recovery"
 
 def reconstruct_plan(claims):
     """Reconstruct plan from claims."""
-    return "\n".join(c.get("text", "") for c in claims if c.get("text"))
+    return "\n\n".join(c.get("text", "") for c in claims if c.get("text"))
 
 
 def run_a4_full(problem):
@@ -141,14 +141,18 @@ def run_a4_full(problem):
         # Repair single failed claim
         failed_id = scope_decision.get("target_claim_ids", [None])[0]
         if failed_id:
+            # Build rationale lookup from verification
+            verif_by_id = {v['claim_id']: v for v in verification}
+            
             for claim in claims:
                 if claim.get("claim_id") == failed_id:
                     try:
                         repair_attempts = 1
+                        rationale = verif_by_id.get(failed_id, {}).get('rationale', '')
                         repaired_text = repair_claim(
                             problem=problem,
                             claim=claim,
-                            rationale="",
+                            rationale=rationale,
                         )
                         claim["text"] = repaired_text
                         claim["was_repaired"] = True
@@ -174,14 +178,18 @@ def run_a4_full(problem):
         # Repair failed claim and all affected dependents
         target_ids = set(scope_decision.get("target_claim_ids", []))
         repair_attempts = len(target_ids)
+        
+        # Build rationale lookup from verification
+        verif_by_id = {v['claim_id']: v for v in verification}
 
         for claim in claims:
             if claim.get("claim_id") in target_ids:
                 try:
+                    rationale = verif_by_id.get(claim.get("claim_id"), {}).get('rationale', '')
                     repaired_text = repair_claim(
                         problem=problem,
                         claim=claim,
-                        rationale="",
+                        rationale=rationale,
                     )
                     claim["text"] = repaired_text
                     claim["was_repaired"] = True
@@ -210,8 +218,13 @@ def run_a4_full(problem):
             try:
                 final_plan = regenerate_plan(problem)
             except Exception as e:
-                final_plan = plan
-                continue
+                # On exception, log and break instead of continue
+                # to prevent exhausting attempts without useful output
+                if attempt < MAX_REGENERATIONS - 1:
+                    continue
+                else:
+                    final_plan = plan
+                    break
 
             try:
                 final_claims = extract_claims(
@@ -252,8 +265,13 @@ def run_a4_full(problem):
             try:
                 final_plan = regenerate_plan(problem)
             except Exception as e:
-                final_plan = plan
-                continue
+                # On exception, log and break instead of continue
+                # to prevent exhausting attempts without useful output
+                if attempt < MAX_REGENERATIONS - 1:
+                    continue
+                else:
+                    final_plan = plan
+                    break
 
             try:
                 final_claims = extract_claims(

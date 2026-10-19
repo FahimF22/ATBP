@@ -20,6 +20,7 @@ import time
 import argparse
 from pathlib import Path
 from datasets import load_dataset
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 from agents.agent_a import agent_a
 from agents.agent_b import agent_b
@@ -35,9 +36,20 @@ def run_a0(problem):
     """A0: Sequential baseline (no recovery)."""
     start_time = time.time()
     try:
-        plan = agent_a(problem)
-        b_output = agent_b(problem, plan)
-        c_output = agent_c(problem, plan, b_output)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            try:
+                plan = executor.submit(agent_a, problem).result(timeout=180)
+                b_output = executor.submit(agent_b, problem, plan).result(timeout=180)
+                c_output = executor.submit(agent_c, problem, plan, b_output).result(timeout=180)
+            except TimeoutError:
+                return {
+                    "strategy": "a0_baseline",
+                    "correct": False,
+                    "prediction": None,
+                    "error": "timeout",
+                    "latency_seconds": 180,
+                    "success": False,
+                }
         latency = time.time() - start_time
         
         return {
@@ -138,7 +150,19 @@ def main():
         if "a2" in strategies:
             print("A2...", end=" ", flush=True)
             try:
-                a2_result = run_a2_full(problem)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    try:
+                        a2_result = executor.submit(run_a2_full, problem).result(timeout=180)
+                    except TimeoutError:
+                        a2_result = {
+                            "strategy": "a2_full_regeneration",
+                            "correct": False,
+                            "prediction": None,
+                            "error": "timeout",
+                            "latency_seconds": 180,
+                            "success": False,
+                        }
+                
                 a2_correct, a2_pred, _ = evaluate_answer(
                     a2_result.get("agent_c"), ground_truth
                 )
@@ -162,7 +186,19 @@ def main():
         if "a3" in strategies:
             print("A3...", end=" ", flush=True)
             try:
-                a3_result = run_a3_full(problem)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    try:
+                        a3_result = executor.submit(run_a3_full, problem).result(timeout=180)
+                    except TimeoutError:
+                        a3_result = {
+                            "strategy": "a3_targeted_repair",
+                            "correct": False,
+                            "prediction": None,
+                            "error": "timeout",
+                            "latency_seconds": 180,
+                            "success": False,
+                        }
+                
                 a3_correct, a3_pred, _ = evaluate_answer(
                     a3_result.get("agent_c"), ground_truth
                 )
@@ -186,7 +222,19 @@ def main():
         if "a4" in strategies:
             print("A4...", end=" ", flush=True)
             try:
-                a4_result = run_a4_full(problem)
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    try:
+                        a4_result = executor.submit(run_a4_full, problem).result(timeout=180)
+                    except TimeoutError:
+                        a4_result = {
+                            "strategy": "a4_adaptive_recovery",
+                            "correct": False,
+                            "prediction": None,
+                            "error": "timeout",
+                            "latency_seconds": 180,
+                            "success": False,
+                        }
+                
                 a4_correct, a4_pred, _ = evaluate_answer(
                     a4_result.get("agent_c"), ground_truth
                 )

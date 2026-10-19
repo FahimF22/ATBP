@@ -18,6 +18,15 @@ def extract_prediction(text):
     answer_pattern = r"\*?\*?Answer\*?\*?:\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
     match = re.search(answer_pattern, text, re.IGNORECASE)
     if match:
+        result = match.group(1).replace(",", "")
+        # Strip any trailing non-numeric characters
+        result = re.sub(r'[^\d.\-].*$', '', result)
+        return result
+    
+    # Priority 1.5: Look for a standalone number on the line immediately following "**Answer:**"
+    answer_block_pattern = r"\*?\*?Answer\*?\*?:\s*\n\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
+    match = re.search(answer_block_pattern, text, re.IGNORECASE)
+    if match:
         return match.group(1).replace(",", "")
     
     # Priority 2: Look for "#### <number>" (GSM8K format)

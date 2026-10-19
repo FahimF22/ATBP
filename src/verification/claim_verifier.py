@@ -8,7 +8,8 @@ from config.config import MODEL_NAME, MAX_TOKENS
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="ollama"
+    api_key="ollama",
+    timeout=120.0
 )
 
 

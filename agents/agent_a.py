@@ -11,6 +11,8 @@ client = OpenAI(
 
 def agent_a(problem):
     prompt = f"""
+Output ONLY the step-by-step reasoning plan. Do NOT include any preamble, greeting, or meta-commentary. Start immediately with Step 1.
+
 You are Agent A in a sequential multi-agent reasoning system.
 
 Your role is Planner/Reasoner.

@@ -20,7 +20,9 @@ from Agents A and B, produce the final answer.
 
 You MUST respond with EXACTLY this structure and nothing else:
 **Reasoning Summary:** [1-2 sentences explaining the solution]
-**Answer:** [ONLY the final numerical value — digits only, no units, no explanation]
+**Answer:** [ONLY the final numerical value — a single integer or decimal, no units, no words, no punctuation]
+
+STOP immediately after the **Answer:** line. Do NOT write anything after the answer number. Any text after **Answer:** will be ignored and may cause scoring errors.
 
 Do NOT include any calculations, alternatives, or additional text after the **Answer:** line.
 Do NOT mention the multi-agent system.

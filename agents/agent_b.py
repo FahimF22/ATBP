@@ -22,6 +22,8 @@ You receive:
 Check Agent A's work for errors. If you find mistakes in calculation
 or logic, recompute correctly. Show your work step-by-step.
 
+Verify every arithmetic operation you perform. Double-check multiplications and additions. If you find an error in Agent A, state it clearly and provide the correct computation.
+
 Use Agent A's reasoning as a starting point, verify every calculation,
 continue the reasoning, and produce a solution that Agent C can use.
 

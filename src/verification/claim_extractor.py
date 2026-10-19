@@ -8,7 +8,8 @@ from config.config import MODEL_NAME, MAX_TOKENS
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="ollama"
+    api_key="ollama",
+    timeout=120.0
 )
 
 
@@ -73,6 +74,8 @@ def extract_claims(problem, reasoning):
     """
 
     prompt = f"""
+Return ONLY the JSON array. Do NOT include any explanation, preamble, or markdown outside the array.
+
 You are an atomic claim extraction module for a
 multi-agent mathematical reasoning system.
 
