@@ -14,7 +14,19 @@ def extract_prediction(text):
     if text is None:
         return None
     
-    # Priority 1: Look for "**Answer:** <number>" or "Answer: <number>" (case-insensitive)
+    # Priority 0: Look for \boxed{...} LaTeX format
+    boxed_pattern = r"\\boxed\{(-?\d+(?:,\d+)*(?:\.\d+)?)\}"
+    match = re.search(boxed_pattern, text)
+    if match:
+        return match.group(1).replace(",", "")
+    
+    # Priority 1: Look for "#### <number>" (GSM8K standard format)
+    gsm8k_pattern = r"####\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
+    match = re.search(gsm8k_pattern, text)
+    if match:
+        return match.group(1).replace(",", "")
+    
+    # Priority 2: Look for "**Answer:** <number>" or "Answer: <number>" (case-insensitive)
     answer_pattern = r"\*?\*?Answer\*?\*?:\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
     match = re.search(answer_pattern, text, re.IGNORECASE)
     if match:
@@ -23,15 +35,9 @@ def extract_prediction(text):
         result = re.sub(r'[^\d.\-].*$', '', result)
         return result
     
-    # Priority 1.5: Look for a standalone number on the line immediately following "**Answer:**"
+    # Priority 2.5: Look for a standalone number on the line immediately following "**Answer:**"
     answer_block_pattern = r"\*?\*?Answer\*?\*?:\s*\n\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
     match = re.search(answer_block_pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).replace(",", "")
-    
-    # Priority 2: Look for "#### <number>" (GSM8K format)
-    gsm8k_pattern = r"####\s*(-?\d+(?:,\d+)*(?:\.\d+)?)"
-    match = re.search(gsm8k_pattern, text)
     if match:
         return match.group(1).replace(",", "")
     

@@ -7,7 +7,7 @@ load_dotenv()
 # Ollama runs locally, so no OpenAI API key is required.
 API_KEY = "ollama"
 
-MODEL_NAME = "llama3.2:latest"
+MODEL_NAME = "qwen2.5:7b"
 
 MAX_TOKENS = 2048
 
