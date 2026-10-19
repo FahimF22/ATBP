@@ -95,39 +95,71 @@ def run_all_strategies(problem, ground_truth, example_id, strategies):
 
     if "a0" in strategies:
         print(f"  Running A0...", end=" ", flush=True)
-        a0_result = run_a0_baseline(problem)
-        is_correct, prediction, gt = evaluate_answer(a0_result["agent_c"], ground_truth)
-        a0_result["prediction"] = prediction
-        a0_result["correct"] = is_correct
-        results["results"]["a0"] = a0_result
-        print(f"✓ ({is_correct})")
+        try:
+            a0_result = run_a0_baseline(problem)
+            is_correct, prediction, gt = evaluate_answer(a0_result["agent_c"], ground_truth)
+            a0_result["prediction"] = prediction
+            a0_result["correct"] = is_correct
+            results["results"]["a0"] = a0_result
+            print(f"OK ({is_correct})")
+        except Exception as e:
+            print(f"FAIL (Connection Error: {type(e).__name__})")
+            results["results"]["a0"] = {
+                "strategy": "a0_baseline",
+                "error": str(e),
+                "skipped": True,
+            }
 
     if "a2" in strategies:
         print(f"  Running A2...", end=" ", flush=True)
-        a2_result = run_a2_full(problem)
-        is_correct, prediction, gt = evaluate_answer(a2_result["agent_c"], ground_truth)
-        a2_result["prediction"] = prediction
-        a2_result["correct"] = is_correct
-        results["results"]["a2"] = a2_result
-        print(f"✓ ({is_correct})")
+        try:
+            a2_result = run_a2_full(problem)
+            is_correct, prediction, gt = evaluate_answer(a2_result["agent_c"], ground_truth)
+            a2_result["prediction"] = prediction
+            a2_result["correct"] = is_correct
+            results["results"]["a2"] = a2_result
+            print(f"OK ({is_correct})")
+        except Exception as e:
+            print(f"FAIL (Connection Error: {type(e).__name__})")
+            results["results"]["a2"] = {
+                "strategy": "a2_full_regeneration",
+                "error": str(e),
+                "skipped": True,
+            }
 
     if "a3" in strategies:
         print(f"  Running A3...", end=" ", flush=True)
-        a3_result = run_a3_full(problem)
-        is_correct, prediction, gt = evaluate_answer(a3_result["agent_c"], ground_truth)
-        a3_result["prediction"] = prediction
-        a3_result["correct"] = is_correct
-        results["results"]["a3"] = a3_result
-        print(f"✓ ({is_correct})")
+        try:
+            a3_result = run_a3_full(problem)
+            is_correct, prediction, gt = evaluate_answer(a3_result["agent_c"], ground_truth)
+            a3_result["prediction"] = prediction
+            a3_result["correct"] = is_correct
+            results["results"]["a3"] = a3_result
+            print(f"OK ({is_correct})")
+        except Exception as e:
+            print(f"FAIL (Connection Error: {type(e).__name__})")
+            results["results"]["a3"] = {
+                "strategy": "a3_targeted_repair",
+                "error": str(e),
+                "skipped": True,
+            }
 
     if "a4" in strategies:
         print(f"  Running A4...", end=" ", flush=True)
-        a4_result = run_a4_full(problem)
-        is_correct, prediction, gt = evaluate_answer(a4_result["agent_c"], ground_truth)
-        a4_result["prediction"] = prediction
-        a4_result["correct"] = is_correct
-        results["results"]["a4"] = a4_result
-        print(f"✓ ({is_correct})")
+        try:
+            a4_result = run_a4_full(problem)
+            is_correct, prediction, gt = evaluate_answer(a4_result["agent_c"], ground_truth)
+            a4_result["prediction"] = prediction
+            a4_result["correct"] = is_correct
+            results["results"]["a4"] = a4_result
+            print(f"OK ({is_correct})")
+        except Exception as e:
+            print(f"FAIL (Connection Error: {type(e).__name__})")
+            results["results"]["a4"] = {
+                "strategy": "a4_adaptive_recovery",
+                "error": str(e),
+                "skipped": True,
+            }
 
     return results
 
