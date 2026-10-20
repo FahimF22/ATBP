@@ -1,15 +1,8 @@
 import json
 import re
 
-from openai import OpenAI
-
-from config.config import MODEL_NAME, MAX_TOKENS
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama"
-)
+from config.config import LLM_BACKEND
+from src.llm_client import call_llm
 
 
 def _extract_json(text):
@@ -73,6 +66,8 @@ def extract_claims(problem, reasoning):
     """
 
     prompt = f"""
+Return ONLY the JSON array. Do NOT include any explanation, preamble, or markdown outside the array.
+
 You are an atomic claim extraction module for a
 multi-agent mathematical reasoning system.
 
@@ -129,26 +124,10 @@ Agent A reasoning:
 Return ONLY valid JSON.
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=0,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise atomic claim "
-                    "extraction module."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    raw, _, _ = call_llm(
+        system_prompt="You are a precise atomic claim extraction module.",
+        user_content=prompt
     )
-
-    raw = response.choices[0].message.content
 
     claims = _extract_json(raw)
 

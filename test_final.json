@@ -1,0 +1,54 @@
+{
+  "config": {
+    "api_provider": "openai",
+    "api_key": "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",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-3.5-turbo",
+    "tau": 0.8,
+    "max_regenerations": 3,
+    "max_repair_attempts": 2,
+    "temps": [
+      0.0,
+      0.7,
+      0.7
+    ],
+    "max_tokens": 2048,
+    "base_seed": 42
+  },
+  "summaries": [
+    {
+      "system": "A0",
+      "correct": "1/1",
+      "acc_pct": 100.0,
+      "wilson_95_ci": "[20.7, 100.0]",
+      "no_answer": 0,
+      "ECR": "n/a",
+      "RSR": "n/a",
+      "CDR": "n/a",
+      "mean_latency_s": 15.1,
+      "mean_tokens": 1161.0,
+      "relative_latency": "1.00x"
+    }
+  ],
+  "traces": {
+    "A0": [
+      {
+        "example_id": 0,
+        "system": "A0",
+        "question": "Janet\u2019s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market?",
+        "gold_answer": 18.0,
+        "predicted_answer": 18.0,
+        "is_correct": true,
+        "has_answer": true,
+        "initial_detected_fault": false,
+        "repair_attempts": 0,
+        "successful_repairs": 0,
+        "correct_units_exposed": 0,
+        "correct_units_altered": 0,
+        "selected_scopes": [],
+        "latency_sec": 15.097437858581543,
+        "total_tokens": 1161
+      }
+    ]
+  }
+}

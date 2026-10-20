@@ -1,15 +1,7 @@
 import json
 import re
 
-from openai import OpenAI
-
-from config.config import MODEL_NAME, MAX_TOKENS
-
-
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="ollama"
-)
+from src.llm_client import call_llm
 
 
 def _extract_json(text):
@@ -76,22 +68,9 @@ def verify_claim(
         evidence = problem
 
     prompt = f"""
-You are a strict claim verification module for a
-mathematical reasoning system.
+You are a claim verification module for a mathematical reasoning system.
 
-Determine whether the given atomic claim is supported
-by the original problem and the supplied context.
-
-Do not assume that the claim is correct merely because
-it appears in the reasoning.
-
-Check:
-- numerical values
-- arithmetic
-- relationships
-- quantities
-- logical conclusions
-- whether the claim is actually supported
+Your task: Determine whether the given atomic claim is valid based on the original problem and context.
 
 Original problem:
 {problem}
@@ -102,50 +81,33 @@ Context:
 Atomic claim:
 {claim["text"]}
 
+Apply these rules in order:
+
+1. DIRECT QUOTE RULE: If the claim text directly quotes or closely paraphrases a fact explicitly stated in the original problem, it is VALID with confidence 0.95. Do NOT second-guess it.
+
+2. LOGICAL SUPPORT RULE: If the claim is implicitly but logically supported by the problem (a necessary intermediate step), it is VALID with confidence 0.80.
+
+3. CONTRADICTION RULE: Only mark a claim INVALID if it DIRECTLY CONTRADICTS a number, quantity, or fact stated in the problem. Confidence 0.90 for a true contradiction.
+
+4. UNSUPPORTED ≠ INVALID: Claims that introduce intermediate reasoning steps not verbatim in the problem are NOT automatically invalid. Mathematical reasoning requires intermediate steps.
+
+5. NEVER mark a claim invalid merely because it lacks numerical detail or because the problem does not explicitly enumerate every sub-quantity.
+
 Return ONLY this JSON format:
 
 {{
   "is_valid": true,
   "confidence": 0.95,
-  "rationale": "The claim is directly supported by the problem."
+  "rationale": "Rule X applied: explanation citing the specific rule used."
 }}
 
-Rules:
-
-is_valid:
-- true if the claim is supported/correct
-- false if the claim is contradicted, unsupported,
-  or mathematically incorrect
-
-confidence:
-- number between 0.0 and 1.0
-
-Use confidence to represent how certain you are.
-
-Verification threshold:
-{tau}
+Verification threshold: {tau}
 """
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        temperature=0,
-        max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a strict mathematical "
-                    "claim verifier."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    raw, _, _ = call_llm(
+        system_prompt="You are a strict mathematical claim verifier.",
+        user_content=prompt,
     )
-
-    raw = response.choices[0].message.content
 
     result = _extract_json(raw)
 

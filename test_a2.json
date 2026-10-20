@@ -1,0 +1,36 @@
+{
+  "config": {
+    "api_provider": "openai",
+    "api_key": "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",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-3.5-turbo",
+    "tau": 0.8,
+    "max_regenerations": 3,
+    "max_repair_attempts": 2,
+    "temps": [
+      0.0,
+      0.7,
+      0.7
+    ],
+    "max_tokens": 2048,
+    "base_seed": 42
+  },
+  "summaries": [
+    {
+      "system": "A2",
+      "correct": "0/0",
+      "acc_pct": 0.0,
+      "wilson_95_ci": "[0.0, 0.0]",
+      "no_answer": 0,
+      "ECR": "0.0% (0/0)",
+      "RSR": "0.0% (0/0)",
+      "CDR": "0.0% (0/0)",
+      "mean_latency_s": 0.0,
+      "mean_tokens": 0.0,
+      "relative_latency": "0.00x"
+    }
+  ],
+  "traces": {
+    "A2": []
+  }
+}
