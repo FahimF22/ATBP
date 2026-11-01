@@ -1,0 +1,15 @@
+%% Baseline sequential multi-agent pipeline (A0)
+%% Paper figure: baseline_architecture.png (Fig. "Baseline sequential multi-agent reasoning architecture")
+flowchart LR
+    P["Problem P<br/>(GSM8K question)"]
+    A["Agent A<br/>Planner / Reasoner<br/>writes a step-by-step plan"]
+    B["Agent B<br/>Intermediate solver<br/>checks the plan and<br/>continues the reasoning"]
+    C["Agent C<br/>Final answer generator<br/>Reasoning Summary + Answer"]
+    Y["Final answer ŷ"]
+
+    P --> A --> B --> C --> Y
+
+    classDef agent fill:#e8eef7,stroke:#2b4c7e,stroke-width:1.5px,color:#000
+    classDef io fill:#ffffff,stroke:#555555,stroke-width:1px,color:#000
+    class A,B,C agent
+    class P,Y io

@@ -487,7 +487,7 @@ def main():
             corrupted_reasoning, error_desc = inject_arithmetic_error(correct_reasoning)
             print(f"  Injected error: {error_desc}")
 
-            if verbose:
+            if args.verbose:
                 print(f"  Original reasoning:\n{correct_reasoning[:300]}")
                 print(f"  Corrupted reasoning:\n{corrupted_reasoning[:300]}")
 

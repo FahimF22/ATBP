@@ -1,0 +1,61 @@
+%% ATBP architecture (A2, A3, A4)
+%% Paper figure: visual_architecture.png (Fig. "ATBP architecture. A verification and
+%% recovery layer sits between Agent A and Agent B.")
+flowchart LR
+    P["Problem P<br/>(GSM8K question)"]
+    A["Agent A<br/>Planner / Reasoner<br/>initial plan (temperature 0)"]
+
+    subgraph LAYER["Verification and recovery layer"]
+        direction TB
+        X["Claim extractor<br/>claims c1 … cn<br/>with depends_on links"]
+        G["Dependency graph G = (V, E)<br/>Down(c), Up(c), depth d(c)"]
+
+        subgraph VER["Hybrid verifier"]
+            direction TB
+            V1["1. Arithmetic check<br/>(exact evaluation)"]
+            V2["2. Grounding check<br/>(operands from problem<br/>or earlier claims)"]
+            V3["3. LLM judge<br/>(remaining claims, one batched call)"]
+            V1 --> V2 --> V3
+        end
+
+        D{"All claims accepted?<br/>valid and q ≥ τ = 0.80"}
+
+        R["Recovery controller<br/>A2: always full · A3: always isolated<br/>A4 (ATBP): rule-based policy, Algorithm 1"]
+
+        subgraph SCOPES["Recovery scopes"]
+            direction TB
+            S1["Isolated claim repair<br/>fix failed claims only"]
+            S2["Branch backtracking<br/>fix failed claims and<br/>recompute Down(c)"]
+            S3["Agent-level regeneration<br/>new Agent A plan<br/>with feedback"]
+            S4["Full regeneration<br/>new Agent A plan<br/>without feedback"]
+        end
+
+        RV["Re-verify the recovered plan"]
+
+        X --> G --> V1
+        V3 --> D
+        D -- "no" --> R
+        R --> S1 & S2 & S3 & S4
+        S1 & S2 & S3 & S4 --> RV
+    end
+
+    B["Agent B<br/>Intermediate solver"]
+    C["Agent C<br/>Final answer generator"]
+    Y["Final answer ŷ"]
+
+    P --> A --> X
+    D -- "yes" --> B
+    RV --> B
+    RV -. "V2 do-no-harm:<br/>still fails → pass the<br/>original plan" .-> B
+    B --> C --> Y
+
+    classDef agent fill:#e8eef7,stroke:#2b4c7e,stroke-width:1.5px,color:#000
+    classDef check fill:#f3f3f3,stroke:#555555,stroke-width:1px,color:#000
+    classDef decide fill:#fff7e0,stroke:#9a6b00,stroke-width:1.5px,color:#000
+    classDef scope fill:#eaf5ea,stroke:#2e6b2e,stroke-width:1px,color:#000
+    classDef io fill:#ffffff,stroke:#555555,stroke-width:1px,color:#000
+    class A,B,C agent
+    class X,G,V1,V2,V3,RV check
+    class D,R decide
+    class S1,S2,S3,S4 scope
+    class P,Y io

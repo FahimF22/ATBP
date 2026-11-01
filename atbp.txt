@@ -1,0 +1,1610 @@
+\documentclass[conference]{IEEEtran}
+
+% ============================================================
+% PACKAGES
+% ============================================================
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{microtype}
+\usepackage{balance}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=blue,
+  urlcolor=blue,
+  bookmarks=true
+}
+
+% ============================================================
+% AUTHOR LAYOUT HELPER (puts the supervisor on a separate row)
+% ============================================================
+\makeatletter
+\newcommand{\linebreakand}{%
+  \end{@IEEEauthorhalign}
+  \hfill\mbox{}\par
+  \mbox{}\hfill\begin{@IEEEauthorhalign}
+}
+\makeatother
+
+\begin{document}
+
+% ============================================================
+% TITLE
+% ============================================================
+\title{
+Adaptive Targeted Backtracking for Error Recovery in Sequential Multi-Agent Reasoning
+}
+
+% ============================================================
+% AUTHORS
+% ============================================================
+\author{
+\IEEEauthorblockN{Md. Fahmidul Hasan}
+\IEEEauthorblockA{
+2233129642\\
+Department of Computer Science and Engineering\\
+North South University\\
+Dhaka, Bangladesh
+}
+\and
+\IEEEauthorblockN{Md. Fahim Fardin}
+\IEEEauthorblockA{
+2232842642\\
+Department of Computer Science and Engineering\\
+North South University\\
+Dhaka, Bangladesh
+}
+\linebreakand
+\IEEEauthorblockN{Dr. Abul Kalam al Azad}
+\IEEEauthorblockA{
+\textit{Supervisor}\\
+Associate Professor\\
+Department of Computer Science and Engineering\\
+North South University\\
+Dhaka, Bangladesh
+}
+}
+
+\maketitle
+
+% ============================================================
+% ABSTRACT
+% ============================================================
+\begin{abstract}
+\normalfont
+In sequential multi-agent systems built on large language models (LLMs),
+each agent passes its intermediate reasoning to the next, so a wrong
+claim made early can shape several later decisions before the final
+answer appears. Existing rollback, verification, and self-correction
+methods detect or reverse errors, but none we found chooses how much
+reasoning to replace based on the dependencies between claims. We
+propose the Adaptive Targeted Backtracking Protocol (ATBP). ATBP splits
+intermediate reasoning into atomic claims, links them in a directed
+dependency graph, checks each claim with a hybrid verifier that combines
+deterministic arithmetic and grounding checks with an LLM judge, and uses
+the result to choose among four recovery actions: isolated claim repair,
+dependency-aware branch backtracking, agent-level regeneration, and full
+regeneration.
+
+We evaluate ATBP on GSM8K with a local 7B model (Qwen2.5-7B-Instruct) and
+with GPT-4o-mini. All systems start from the same initial plan, and every
+model call is logged with its token count. Under controlled fault
+injection (20 faults in clean traces), the verifier found 90\% of the
+faults. Isolated repair, branch backtracking, full regeneration, and ATBP
+recovered every case, against 75\% with no recovery, and ATBP used
+30--37\% fewer tokens than full regeneration while rewriting only a small
+share of the accepted claims. On 30 unmodified problems recovery did not
+raise accuracy. With GPT-4o-mini every system scored 93.3\%, and with the
+7B model recovery lost one problem after a false alarm (86.7\% against
+83.3\%). The errors that remained were misreadings of the question that
+the verifier did not detect. These are small-sample results, and they
+point to error detection, not repair, as the main obstacle.
+\end{abstract}
+
+\begin{IEEEkeywords}
+\normalfont
+Large language models, multi-agent systems, reasoning verification,
+fault localization, fault injection, error recovery, backtracking.
+\end{IEEEkeywords}
+
+% ============================================================
+% 1. INTRODUCTION  (general literature)
+% ============================================================
+\section{Introduction}
+
+LLMs are increasingly deployed as agentic systems in which several
+agents plan, reason, verify, and act on a shared task. Instead of
+producing an answer in one pass, each agent builds on the output of the
+previous one. This division of labor helps with complex problems, but it
+also lets errors travel. A sequential pipeline can be written as
+\[
+P \rightarrow A_1 \rightarrow A_2 \rightarrow \cdots
+\rightarrow A_n \rightarrow \hat{y},
+\]
+where $P$ is the input problem, $A_i$ is an agent, and $\hat{y}$ is the
+predicted answer. If an early agent states a wrong assumption,
+later agents usually accept it as context and derive more conclusions
+from it. The final answer can then be wrong even though every later agent
+did its own job correctly. Multi-step mathematical reasoning is
+especially exposed, because one early arithmetic or interpretation error
+invalidates every calculation that follows.
+
+Prior work has attacked this problem through collaboration and
+fine-grained verification. These approaches improve an initial answer or
+identify questionable reasoning, but leave open how a system should
+recover after an error has entered a sequential trace. We review them
+briefly here, and Section~\ref{sec:related} covers the closest work in
+detail.
+
+\subsection{Making the First Attempt Better}
+
+Much recent work uses several model instances to improve reasoning. Du et al.
+let agents propose answers and critique each other, which raises accuracy
+on arithmetic and factuality tasks \cite{debate}. AgentBench provides a
+broad evaluation of LLMs on interactive agent tasks and exposes
+weaknesses in long-horizon decision making and instruction following
+\cite{agentbench}. Other work reduces errors passed between agents by
+having them ask for clarification when information is unclear
+\cite{agentask}. These studies show that coordination between agents
+matters. They improve the quality of the first attempt, but say little
+about what to do after a wrong claim has already entered the shared
+context.
+
+\subsection{Checking Below the Answer Level}
+
+Another line of work verifies reasoning at a finer grain than the whole
+answer. FActScore breaks generated text into atomic factual claims and
+scores each against a knowledge source \cite{factscore}, and multi-agent
+verifiers extend this idea by assigning claim extraction and checking to
+separate agents \cite{march}. This work supports our decision to treat
+claims, not whole outputs, as the basic unit of checking. It also shows
+the remaining difficulty: these methods find faulty pieces, but they do
+not decide how much of the surrounding reasoning to redo.
+
+\subsection{Problem Statement and Contribution}
+
+These lines of work leave one question open: once a faulty claim has
+been found, how much should be redone? The choices carry different
+costs. Repairing one claim is cheap, but it leaves dependent claims
+untouched, and those may now be wrong. Regenerating a whole agent output
+removes dependent errors but throws away correct claims. Backtracking
+along the dependent claims sits between the two, and full regeneration
+restarts everything at the highest computational cost. A fixed strategy
+cannot suit every fault.
+
+We study the Adaptive Targeted Backtracking Protocol (ATBP), which
+chooses a recovery scope after a fault is detected. ATBP represents
+reasoning as atomic claims, links them in a directed dependency graph, and
+uses verification confidence and graph features to select one of four
+recovery scopes (Section~\ref{sec:architecture}). We do not
+claim claim verification, dependency graphs, or rollback as new ideas;
+ReAgent \cite{reagent} and step-level verification
+\cite{processsupervision,tyen} already cover each of them separately.
+Our contribution is to combine them into one recovery-scope selection
+framework and to evaluate it against fixed recovery strategies under
+controlled faults. The study has four objectives, which
+Section~\ref{sec:related} turns into three research questions:
+
+\begin{enumerate}
+    \item represent reasoning as atomic claims with prerequisite links;
+    \item select the recovery scope from verification and dependency
+    features;
+    \item evaluate recovery on injected claim-level faults;
+    \item report accuracy, error cascade, repair success, collateral
+    damage, token usage, and latency.
+\end{enumerate}
+
+We test ATBP in two settings (Section~\ref{sec:results}). When
+faults are injected into clean traces, targeted recovery repairs all of
+them at a lower token cost than full regeneration and changes much less
+of the accepted reasoning. On unmodified problems it does not raise
+accuracy, mainly because the errors that remain are misreadings of the
+question that the verifier does not catch.
+
+The rest of the paper is organized as follows.
+Section~\ref{sec:related} reviews the work closest to ours, states the
+gaps ATBP addresses, and poses our research questions.
+Sections~\ref{sec:dataset}--\ref{sec:method}
+describe the dataset, architecture, and method.
+Sections~\ref{sec:setup}--\ref{sec:metrics} give the experimental setup
+and metrics, Section~\ref{sec:results} reports the results, and
+Sections~\ref{sec:discussion} and~\ref{sec:conclusion} discuss
+limitations and conclude.
+
+% ============================================================
+% 2. RELATED WORK  (highly relevant literature only)
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+
+This section covers the work that overlaps directly with ATBP. We
+follow the questions a recovery system has to answer in order. Is a
+step wrong? Where did the error start? How do errors spread, and how
+can they be produced under control? Can the model fix itself? What do
+existing systems do once an error is found? Each group answers its
+question and leaves the next one open, and the last group leads to the
+gaps we address. Table~\ref{tab:gap} condenses the argument.
+
+\subsection{Is a Step Wrong? Step-Level Verification and Claim Checking}
+
+Process reward models (PRMs) score intermediate steps instead of only
+the final answer. Lightman et al.\ show the value of process supervision
+for mathematical reasoning \cite{processsupervision}. Math-Shepherd
+constructs step-level reward signals without requiring human labels for
+every step \cite{mathshepherd}, while later work studies PRM data
+construction and evaluation \cite{prmlessons}. Sadeddine and Suchanek
+verify individual steps in deductive reasoning chains
+\cite{deductive}.
+
+FG-PRM is particularly relevant because it goes beyond ordinary
+step-scoring. It defines six types of hallucination in mathematical
+reasoning and automatically creates fine-grained training examples by
+injecting hallucinations into otherwise correct reasoning steps. Its
+process reward models detect hallucination types at the step level and
+rank candidate solutions \cite{fgprm}. This means synthetic step-level
+error injection and fine-grained detection are not new contributions
+of ATBP. The distinction in our study is the multi-agent setting and
+the matched comparison of recovery scopes after a known claim has been
+corrupted.
+
+MARCH is another close claim-level verifier. It uses three agents: a
+Solver generates an answer, a Proposer decomposes it into independently
+checkable claims, and a Checker verifies each claim against retrieved
+evidence without seeing the Solver's original answer
+\cite{march}. This information asymmetry is intended to reduce
+confirmation bias, and the pipeline is trained with multi-agent
+reinforcement learning. Unlike ATBP, MARCH focuses on factual
+verification in retrieval-augmented generation rather than choosing
+how much of a sequential reasoning trace to replace.
+
+Stepwise Verification also uses detected errors to produce targeted
+remediation, but it is designed for tutoring rather than recovery in a
+sequential multi-agent trace \cite{stepwise}. Taken together, these
+methods establish strong prior work in process supervision, synthetic
+reasoning-error generation, claim checking, and localized remediation.
+The question left for ATBP is whether the dependency structure of a
+multi-agent trace can guide the choice between claim repair, agent-level
+regeneration, branch backtracking, and full regeneration. In ATBP the
+verifier and generator currently use the same local model, so verifier
+reliability must be measured rather than assumed.
+
+\subsection{Where Is the Error? Failure Taxonomies and Attribution}
+
+Knowing that a step is wrong is not the same as knowing where the error
+started. MAST defines 14 failure modes in three groups (system design,
+inter-agent misalignment, and task verification); its associated
+MAST-Data collection contains more than 1,600 annotated traces from
+seven frameworks \cite{mast}. Who\&When turns the question
+into a task: given a failed multi-agent run, name the responsible agent
+and the decisive error step. Its authors report that step-level
+accuracy stays low, especially on hand-crafted systems
+\cite{whowhen}.
+
+RAFFLES attributes faults offline with iterative reasoning. A Judge
+proposes a faulty step, and Evaluators check whether the step is wrong,
+whether it is the earliest critical error, and whether it causes the
+failure. It is evaluated on Who\&When and on mathematical traces from
+ReasonEval (MR-GSM8K and MR-MATH-Invalid) \cite{raffles}. Its authors
+note that large public benchmarks for fault attribution are scarce, and
+suggest synthetic datasets as a remedy. Tyen et al.\ separate two
+abilities: finding a reasoning error and correcting it once its location
+is given. Models are poor at the first and can do the second
+\cite{tyen}.
+
+These approaches mainly address attribution or correction once a trace
+has failed. RAFFLES is post-hoc by design, and Tyen et al.\ correct at a
+supplied location.
+As far as we can tell, none compares recovery scopes or asks which
+downstream claims the fault has contaminated. They do support the case
+for separate evaluation of localization and correction, and the call for
+synthetic fault data supports our controlled injection.
+
+\subsection{How Do Errors Spread, and How Can They Be Produced Under Control?}
+
+AgentAsk groups communication errors between agents into four types
+(data gap, signal corruption, referential drift, and capability gap) and
+trains a lightweight policy that decides when and whom to ask for
+clarification, with reinforcement learning balancing accuracy against
+latency and cost. It reports accuracy gains of up to 4.69\% on five
+benchmarks, including GSM8K, with overhead under 10\%
+\cite{agentask}. It prevents errors at the message boundary; it does not
+repair a wrong claim that has already entered the context.
+
+Huang et al.\ study what faulty agents do to a team. AutoTransform
+rewrites an agent's profile so that it adds stealthy errors, and
+AutoInject inserts errors directly into its messages. They compare
+chain, flat, and hierarchical structures on four tasks, including math,
+and report that the linear chain is particularly vulnerable. They then
+add a Challenger mechanism and an Inspector agent that reviews and
+corrects messages, recovering up to 96.4\% of the errors made by faulty
+agents \cite{huangres}. This is the closest prior work to our
+multi-agent fault-injection setting. Its injection operates at the
+message level and its repair is performed by a reviewer agent. It does
+not report a matched comparison of claim repair, dependency-branch
+backtracking, agent regeneration, and full regeneration from the same
+corrupted trace. Our evaluation makes that comparison and records the
+injected claim and its dependents.
+
+\subsection{Can the Model Fix Itself? Limits of Self-Correction}
+
+Tyen et al.\ show that correction works when the error location is
+supplied. Huang et al.\ show what happens when it is not: LLMs generally
+cannot improve their own reasoning without external feedback, and
+intrinsic self-correction can reduce accuracy \cite{huang}. Their GPT-3.5
+results illustrate this. Standard prompting reached 75.9\% on GSM8K, two
+rounds of intrinsic self-correction reached 74.7\%, and correction with
+oracle labels reached 84.3\%. Regenerating again is therefore not a
+repair in itself. It needs an external signal, which motivates
+claim-level verification as the trigger for recovery in ATBP, and it
+motivates measuring how much previously accepted reasoning each recovery
+changes.
+
+\subsection{What Do Existing Systems Do After an Error? Rollback, Feedback, and Adaptive Refinement}
+
+Three systems act on errors, and all are close to ATBP. ReAgent adds
+local and global rollback to a multi-agent framework so that agents can
+return to earlier states when their outputs conflict \cite{reagent}. It
+was evaluated on knowledge-intensive multi-hop question answering. Its
+rollback has a local and a global level, and as far as we can tell it
+does not choose a scope using the dependencies between claims.
+
+AgentDebug names error propagation as the main bottleneck in agent
+reliability. It traces a failed trajectory to its root cause using a
+taxonomy of failure modes, then feeds corrective feedback back to the
+agent for another attempt, with gains of up to 26\% relative task
+success on ALFWorld, GAIA, and WebShop \cite{agentdebug}. It is the
+closest system in spirit, since it locates the cause and recovers. Its
+recovery is feedback followed by a new attempt on agentic benchmarks,
+and as far as we can tell it does not select among repair scopes from
+the dependency structure of the trace, nor does it target multi-step
+arithmetic.
+
+MAgICoRe applies coarse-to-fine iterative refinement and spends extra
+reasoning effort on selected parts of a task \cite{magicore}. It decides
+where to put effort, but not which previously generated claims must be
+replaced once an error is confirmed, and it does not track claim
+dependencies. ATBP therefore does not present rollback or feedback as
+new; it asks which of several recovery scopes to use.
+
+\begin{table*}[t]
+\centering
+\caption{Closest related work, what each does well, and the gap ATBP
+addresses.}
+\label{tab:gap}
+\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.17\textwidth}
+>{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Work} & \textbf{What it does well} &
+\textbf{Gap addressed by ATBP}\\
+\midrule
+PRMs \cite{processsupervision,mathshepherd,prmlessons} &
+Score intermediate steps and support process-level supervision &
+Do not select a recovery scope from claim dependencies\\
+FG-PRM \cite{fgprm} &
+Injects synthetic reasoning-step hallucinations and trains fine-grained detectors &
+Does not compare recovery scopes in sequential multi-agent traces\\
+MARCH \cite{march} &
+Claim-level verification with an independent Checker &
+Needs retrieved evidence; no recovery scope\\
+Who\&When \cite{whowhen}, RAFFLES \cite{raffles} &
+Name the responsible agent and step; RAFFLES also tests on math traces &
+Post-hoc attribution; no repair and no downstream view\\
+MAST \cite{mast} &
+Empirical taxonomy of multi-agent failures, including verification failures &
+Describes failures; no recovery mechanism\\
+Tyen et al.\ \cite{tyen}, Huang et al.\ \cite{huang} &
+Show correction works at a known location and fails without feedback &
+No comparison of recovery scopes\\
+AgentAsk \cite{agentask} &
+Prevents communication errors with learned clarification &
+Prevention only; wrong claims already in context stay\\
+Huang et al.\ \cite{huangres} &
+Message-level fault injection on chains; Inspector recovers errors &
+No claim-level location or dependents logged; no scope selection\\
+ReAgent \cite{reagent}, MAgICoRe \cite{magicore} &
+Local and global rollback; effort allocation &
+Fixed scope levels; no claim-dependency graph\\
+AgentDebug \cite{agentdebug} &
+Root-cause tracing with feedback and re-attempt &
+Agentic tasks; scope not chosen from claim dependencies\\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{Research Gaps and Our Approach}
+\label{sec:gaps}
+
+Taken together, the reviewed work can detect wrong steps, attribute
+faults, inject errors, and in some settings provide remediation or
+rollback. The gap motivating ATBP is narrower: how to select the scope
+of recovery in a sequential multi-agent trace using claim dependencies.
+The following four gaps define the questions tested in this study.
+
+\begin{enumerate}
+    \item \textbf{No dependency-based scope selection.} Rollback and
+    feedback methods \cite{reagent,agentdebug} provide recovery
+    mechanisms, adaptive refinement \cite{magicore} allocates effort
+    without tracking claim prerequisites, and PRMs and claim verifiers
+    \cite{processsupervision,mathshepherd,fgprm,march} primarily detect
+    or score errors rather than select a recovery action. The reviewed
+    methods do not select among claim repair, agent regeneration, branch
+    backtracking, and full regeneration using the prerequisite structure
+    of a trace.
+
+    \item \textbf{No downstream-aware localization and repair.}
+    Fault attribution \cite{raffles,whowhen} and known-location
+    correction \cite{tyen} treat the faulty step on its own and do not
+    ask which dependent claims must be reconsidered.
+
+    \item \textbf{No matched comparison of recovery scopes in
+    sequential multi-agent traces.} Prior work already injects
+    hallucinations into individual mathematical reasoning steps to
+    train fine-grained detectors \cite{fgprm}, and studies message-level
+    faults in multi-agent collaboration \cite{huangres}. These are
+    important precedents. The remaining question is different: how do
+    claim repair, agent-level regeneration, dependency-branch
+    backtracking, and full regeneration compare when they start from
+    the same corrupted sequential multi-agent trace, with the injected
+    claim and its expected dependents recorded? The evaluation in this
+    paper tests that setting.
+
+    \item \textbf{No shared recovery-specific evaluation protocol.}
+    Existing studies use different tasks, fault definitions, and outcome
+    measures. The GSM8K results in Table~\ref{tab:literature} provide
+    context, but they are not matched comparisons with our results
+    \cite{debate,huang}. We therefore evaluate error cascade, repair
+    success, and collateral damage under one controlled protocol rather
+    than claiming that earlier models or baselines are generally weak.
+\end{enumerate}
+
+The model choices in close prior work also differ from ours. MARCH
+trains Llama-3.1-8B-Instruct and Qwen3-8B \cite{march}, and RAFFLES
+evaluates Llama-3.3-70B-Instruct, gpt-oss-20b, and Claude Sonnet 4
+\cite{raffles}. We run our experiments with two backbones of different
+strength: Qwen2.5-7B-Instruct served locally, and GPT-4o-mini through the
+OpenAI API. This shows whether recovery behaves the same way when the
+base model makes fewer mistakes.
+
+ATBP is designed to address these gaps. First, it selects the recovery
+scope from verification results, dependency depth, downstream impact,
+and the share of the plan a repair would touch. Second, our controlled
+evaluation corrupts single claims in otherwise clean GSM8K traces,
+records each fault's location and dependents, and runs every recovery
+scope on the same corrupted input. Third, we report three recovery
+metrics, the Error Cascade Rate (ECR), Repair Success Rate (RSR), and
+Collateral Damage Rate (CDR), together with token usage and model time.
+
+We originally aimed for accuracy above 90\% on GSM8K, compared with the
+85.0\% reported for multi-agent debate with ChatGPT \cite{debate}.
+GPT-4o-mini already passes this on our sample without any recovery, so
+the number says little about ATBP itself. We therefore judge recovery by
+what it adds to the same model and pipeline, on both clean and
+fault-injected traces, rather than by an absolute accuracy figure.
+
+\subsection{Research Questions}
+
+The gaps lead to three questions.
+
+\begin{itemize}
+    \item \textbf{RQ1.} Can verification confidence, dependency depth,
+    downstream impact, and estimated cost select a recovery scope that
+    is more accurate or cheaper than any fixed scope?
+    \item \textbf{RQ2.} Under controlled claim-level faults, how do the
+    four recovery scopes differ in error cascade, repair success, and
+    collateral damage?
+    \item \textbf{RQ3.} Do these differences, and the accuracy target,
+    hold with stronger models and with token usage and latency
+    included?
+\end{itemize}
+
+% ============================================================
+% 3. DATASET
+% ============================================================
+\section{Dataset}
+\label{sec:dataset}
+
+We use the test split of GSM8K \cite{gsm8k}, a set of grade-school word
+problems that each need several reasoning steps to reach a numerical
+answer. It fits this study for two reasons. A solution can be written as
+a sequence of small claims that are checked one at a time, and the final
+answer is a single number, so it can be scored automatically.
+
+Both subsets below are taken in order from the start of the test split,
+which makes every run easy to repeat.
+
+\begin{itemize}
+    \item \textbf{Natural-error set.} The first 30 test problems (indices
+    0--29). Every system is run on every problem, and the only errors are
+    the ones the models make on their own.
+    \item \textbf{Fault-injection set.} The first eight test problems
+    (indices 0--7). Each problem is first solved without any fault. If
+    this clean run is already wrong, the problem is dropped, because a
+    recovered answer could not be told apart from one that was never
+    corrected. With Qwen2.5-7B two problems were dropped, which left six
+    problems and 20 injected faults.
+\end{itemize}
+
+Agent A's plans contain 7.1 claims on average with Qwen2.5-7B (between 3
+and 12) and 9.1 with GPT-4o-mini (between 5 and 16).
+
+For every injected fault we log the target claim, the fault type, the
+original and corrupted text, the depth of the claim, its number of
+dependents, and the dependents into which the wrong value was carried.
+The reference answer is always the clean one, so all recovery strategies
+start from the same corrupted trace and are scored against the same
+answer. Section~\ref{sec:injection} explains how the faults are made.
+
+These subsets are small. We chose them to exercise the whole pipeline and
+analysis on two models within a limited budget, not to estimate
+benchmark accuracy, and the results should be read together with the
+confidence intervals we report.
+
+% ============================================================
+% 4. SYSTEM ARCHITECTURE
+% ============================================================
+\section{System Architecture}
+\label{sec:architecture}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth,height=0.4\textheight,
+keepaspectratio]{visual_architecture.png}
+\caption{ATBP architecture. A verification and recovery layer sits
+between Agent A and Agent B.}
+\label{fig:architecture}
+\end{figure*}
+
+The system is a sequential pipeline of three LLM agents:
+\[
+\text{Problem} \rightarrow A \rightarrow B \rightarrow C
+\rightarrow \hat{y}.
+\]
+Agent A writes a step-by-step plan. Agent B checks that plan and
+continues the reasoning, and Agent C writes the final answer in a fixed
+format from which the number is read. The baseline
+(Fig.~\ref{fig:baseline}) is this pipeline and nothing else.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth,height=0.4\textheight,
+keepaspectratio]{baseline_architecture.png}
+\caption{Baseline sequential multi-agent reasoning architecture.}
+\label{fig:baseline}
+\end{figure}
+
+The recovery architecture (Fig.~\ref{fig:architecture}) places a
+verification and recovery layer between Agent A and Agent B. The layer
+has four parts.
+
+\begin{enumerate}
+    \item \textbf{Claim extractor.} Splits Agent A's plan into atomic
+    claims and records which earlier claims each one uses.
+    \item \textbf{Dependency graph.} Built from those links. It gives the
+    dependents, ancestors, and depth of any claim.
+    \item \textbf{Hybrid verifier.} Runs a deterministic arithmetic check
+    and a grounding check on every claim, and sends the remaining claims
+    to an LLM judge in one batched call.
+    \item \textbf{Recovery controller.} If any claim fails, it chooses one
+    of four scopes and applies it: isolated claim repair, branch
+    backtracking, agent-level regeneration (a new plan written with the
+    failed steps as feedback), or full regeneration (a new plan sampled
+    without feedback).
+\end{enumerate}
+
+Whatever the controller does, the resulting plan then goes through
+Agents B and C exactly as in the baseline. All systems produce their
+final answer the same way, so a difference between two systems can only
+come from the plan that reaches Agent B.
+
+Two further design choices keep the comparison fair. First, every system
+starts from the same first plan. Agent A's initial plan, its claims, and
+their verification are generated once with greedy decoding and then
+reused through a cache of model calls, so a system can differ from the
+baseline only through its recovery decision. An earlier pilot did not
+share the plan, and the systems ended up starting from different plans
+even at temperature zero. Second, every model call goes through one
+client that records prompt tokens, completion tokens, and model time.
+Calls answered from the cache are charged at their original cost, so the
+reported cost of a system does not depend on the order in which systems
+were run.
+
+% ============================================================
+% 5. METHODOLOGY
+% ============================================================
+\section{Methodology}
+\label{sec:method}
+
+The method has six parts: sequential reasoning, claim extraction,
+dependency modeling, claim verification, recovery, and the controlled
+fault injection used to evaluate recovery.
+
+\subsection{Sequential Multi-Agent Reasoning}
+
+Let $P$ be the input problem. The baseline pipeline is
+\[
+P \rightarrow A \rightarrow B \rightarrow C \rightarrow \hat{y},
+\]
+where $A$, $B$, and $C$ are the three agents and $\hat{y}$ is the
+predicted answer. Final-answer accuracy is
+\[
+\mathrm{Accuracy} = \frac{N_{\mathrm{correct}}}{N},
+\]
+where $N_{\mathrm{correct}}$ is the number of correctly solved examples
+and $N$ is the number evaluated.
+
+\subsection{Atomic Claim Extraction}
+
+Agent A produces a reasoning sequence
+\[
+R_A = \{s_1,s_2,\ldots,s_m\},
+\]
+which the system converts into a set of atomic claims
+\[
+C = \{c_1,c_2,\ldots,c_n\}.
+\]
+Each claim is a triple
+\[
+c_i = (id_i,text_i,D_i),
+\]
+where $id_i$ is the identifier, $text_i$ is the content, and $D_i$ is
+the set of prerequisite claims that $c_i$ depends on.
+
+The extractor is an LLM prompted to copy each step with its numbers and
+calculations exactly as written, without fixing anything. Its output is
+constrained by a JSON schema (the format option of the local server and
+strict structured outputs for the OpenAI model). The result is then
+normalized: claims are renumbered $c_1,\ldots,c_n$ in reasoning order,
+and only links to earlier claims are kept. The graph is therefore
+acyclic by construction, and the reasoning order is also a topological
+order. Recovery depends on these links, since a missing or wrong edge
+gives a wrong recovery boundary. We have not yet measured extraction
+quality against human labels.
+
+\subsection{Dependency Graph}
+
+The claims form a directed graph $G=(V,E)$, where each vertex
+$v_i \in V$ is a claim and an edge $(c_i,c_j)\in E$ means that $c_j$
+depends on $c_i$:
+\[
+(c_i,c_j)\in E
+\quad \Longleftrightarrow \quad
+c_i \in D_j.
+\]
+The downstream set of a claim $c$ is
+\[
+\operatorname{Down}(c)=
+\{v\in V\mid c\leadsto v\},
+\]
+where $c\leadsto v$ means a directed path exists from $c$ to $v$, and
+$\operatorname{Up}(c)$ is defined in the same way for ancestors. The
+dependency depth is
+\[
+d(c)=
+\begin{cases}
+0, & \text{if } Pred(c)=\emptyset,\\[4pt]
+1+\max_{p\in Pred(c)}d(p), & \text{otherwise.}
+\end{cases}
+\]
+
+A downstream claim is a candidate for rechecking, not a proven error. It
+may have been derived independently, or it may still be correct after an
+upstream mistake.
+
+\subsection{Claim Verification}
+
+Each claim passes through up to three checks.
+
+\begin{enumerate}
+    \item \textbf{Arithmetic check.} Every equation in the claim, such as
+    ``$9 \times 60 = 540$'', is parsed after LaTeX and Unicode symbols are
+    normalized, and is evaluated exactly. Percentages and chained
+    equalities are handled. A result that differs from the true value by
+    more than rounding marks the claim invalid with confidence 1, and the
+    correct value is stored for the repair step.
+    \item \textbf{Grounding check.} Every operand of a calculation must
+    appear in the problem (number words included), in an earlier claim,
+    or in a short list of common constants such as 12, 24, 60, or 100. A
+    claim that uses an unexplained number is marked invalid with
+    confidence 0.85.
+    \item \textbf{LLM judge.} The claims not settled by the first two
+    checks are sent with the problem in a single call. The judge is told
+    that the arithmetic has already been checked and is asked whether the
+    right quantities and operations are used. It returns a label, a
+    confidence, and a short rationale for each claim. A claim that the
+    batched call misses is judged on its own.
+\end{enumerate}
+
+The verifier therefore returns, for each claim,
+\[
+V(c_i)=(\mathrm{valid}_i,q_i),
+\]
+where $q_i\in[0,1]$. A threshold $\tau$ decides acceptance:
+\[
+\mathrm{Accepted}(c_i)=
+\begin{cases}
+1, & \mathrm{valid}_i=\mathrm{True}
+\land q_i\geq\tau,\\
+0, & \text{otherwise,}
+\end{cases}
+\]
+with $\tau=0.80$.
+
+The deterministic checks cannot be fooled by the model, but they only
+catch arithmetic and copying errors. The judge covers everything else,
+but it runs on the same model as the agents. Its confidence is a
+model-generated estimate rather than a calibrated probability, and its
+mistakes may line up with the agents' mistakes.
+
+\subsection{Recovery Scopes}
+
+When at least one claim fails,
+\[
+\exists c_i\in C:\ \mathrm{Accepted}(c_i)=0,
+\]
+one of four recovery scopes is applied. After any scope, the new plan is
+verified again.
+
+\paragraph*{Isolated claim repair ($R_{\mathrm{claim}}$).} Each failed
+claim is repaired on its own. If the arithmetic check rejected it, the
+stored correct value is written in directly. Otherwise an LLM rewrites
+only that step, given the problem, the earlier steps, and the verifier's
+rationale. Dependent claims are left as they are, even if they used the
+wrong value.
+
+\paragraph*{Branch backtracking ($R_{\mathrm{branch}}$).} The failed
+claims and all claims in their downstream sets are recomputed in
+reasoning order. Failed claims are repaired as above. For each dependent
+claim, if a corrected value appears in it exactly once, the new value is
+substituted and the arithmetic is recomputed. If the value is missing or
+ambiguous, for example when the same number appears twice, an LLM
+re-derives the claim from its corrected prerequisites. Claims outside the
+branch are not touched.
+
+\paragraph*{Agent-level regeneration ($R_{\mathrm{agent}}$).} Agent A
+writes a new plan, and the prompt lists the failed steps and why they
+failed. Sampling uses temperature 0.7, with a different seed for each of
+up to three attempts. The first plan whose claims all pass is kept. If
+none passes, the attempt with the fewest failed claims is kept.
+
+\paragraph*{Full regeneration ($R_{\mathrm{full}}$).} The same procedure
+without any feedback, which amounts to a blind restart of Agent A.
+
+The fixed-scope systems always use one action: A2 uses full
+regeneration and A3 uses isolated repair. A4 is ATBP, which chooses the
+scope as described next.
+
+\subsection{Adaptive Recovery Scope}
+
+ATBP treats recovery as a choice from the action set
+\[
+\mathcal{R} =
+\{R_{\mathrm{claim}},R_{\mathrm{agent}},
+R_{\mathrm{branch}},R_{\mathrm{full}}\}.
+\]
+For each failed claim $c_f$ the system computes the features
+\[
+x_f =
+[q_f,d(c_f),|\operatorname{Down}(c_f)|,
+|\operatorname{Up}(c_f)|,\mathrm{cost}_f],
+\]
+where $q_f$ is the verifier confidence, $d(c_f)$ the dependency depth,
+$|\operatorname{Down}(c_f)|$ and $|\operatorname{Up}(c_f)|$ the numbers
+of downstream and upstream claims, and
+$\mathrm{cost}_f = (1+|\operatorname{Down}(c_f)|)/n$ the share of the
+plan that a branch repair would touch. A policy $\pi$ maps these
+features to an action, $R^*=\pi(x_f)$.
+
+The current policy is a short list of rules
+(Algorithm~\ref{alg:policy}). If most of the plan failed, the plan is
+treated as broken and fully regenerated. If there are several
+independent faults, Agent A is asked for a new plan with feedback. If no
+failed claim has dependents, only the failed claims are repaired.
+Otherwise the failed branch is recomputed, unless that branch would cover
+most of the plan, in which case regenerating with feedback is the
+simpler option. The confidence $q_f$ enters only through the acceptance
+threshold. The two thresholds were fixed by hand before the experiments
+and have not been tuned.
+
+\begin{algorithm}[t]
+\caption{Rule-based scope selection in A4}
+\label{alg:policy}
+\begin{algorithmic}[1]
+\Require claims $C$ ($|C|=n$), failed set $F$, graph $G$
+\If{$F=\emptyset$} \Return no recovery \EndIf
+\State $A \gets F \cup \bigcup_{c\in F}\operatorname{Down}(c)$
+\State $k \gets |\{c\in F : \operatorname{Up}(c)\cap F=\emptyset\}|$
+\If{$|F|/n \geq 0.5$} \Return $R_{\mathrm{full}}$ \EndIf
+\If{$k \geq 3$} \Return $R_{\mathrm{agent}}$ \EndIf
+\If{$\operatorname{Down}(c)=\emptyset$ for all $c\in F$}
+  \Return $R_{\mathrm{claim}}$ \EndIf
+\If{$|A|/n \geq 0.6$} \Return $R_{\mathrm{agent}}$ \EndIf
+\State \Return $R_{\mathrm{branch}}$
+\end{algorithmic}
+\end{algorithm}
+
+Our hypothesis is that these features give a better balance of
+correctness, collateral change, and cost than any fixed scope. The graph
+alone cannot guarantee a good choice, because both the verifier and the
+extracted links can be wrong, so the hypothesis is tested on inputs with
+known fault locations.
+
+\subsection{Controlled Fault Injection}
+\label{sec:injection}
+
+To test recovery when the error is known, we corrupt one claim in a
+clean trace. There are two fault types.
+
+\begin{itemize}
+    \item \textbf{Arithmetic fault.} The result of a correct calculation
+    is replaced by a plausible wrong value, for example
+    ``$3\times 15=40$''.
+    \item \textbf{Operand fault.} A number copied from the problem is
+    replaced by a wrong value and the result is recomputed, so the
+    arithmetic itself stays consistent, for example ``$3\times 18=54$''
+    when the problem says 15.
+\end{itemize}
+
+Wrong values come from a seeded random generator that applies a small
+offset or a factor such as 0.5, 1.25, or 2. Each fault is placed in one
+of two positions: \emph{deep}, the eligible claim with the most
+dependents, or \emph{leaf}, an eligible claim with no dependents. The
+wrong value is then carried into every downstream claim with correct
+arithmetic. Only the target claim is wrong, and every later claim that
+uses it is consistently wrong, which is what a real early mistake looks
+like.
+
+Each corrupted trace is run under two localization conditions. Under
+\emph{detected} localization the hybrid verifier decides which claims
+failed. Under \emph{oracle} localization exactly the injected claim is
+marked as faulty, which separates the quality of recovery from the
+quality of detection. Under each condition we run no recovery, each of
+the four fixed scopes, and the A4 policy, all from the same corrupted
+trace.
+
+\subsection{Verifier Refinements}
+\label{sec:v2}
+
+The first GPT-4o-mini runs showed that most flags on correct plans came
+from the LLM judge, and that some of its rationales contradicted
+themselves. We therefore added three optional changes. They are switched
+on together, and we refer to this configuration as V2.
+
+\begin{enumerate}
+    \item \textbf{Value check.} The judge must also state the value an
+    invalid claim should have. If that value equals the value the claim
+    already states, the flag is dropped. This removes cases such as a
+    judge rejecting ``$204+160+330=694$'' while giving 694 as the correct
+    total.
+    \item \textbf{Program cross-check.} Following program-aided reasoning
+    \cite{pal}, the model writes a short Python program that solves the
+    problem from scratch. The program runs in a separate interpreter with
+    a time limit, and only plain arithmetic code is allowed. If its
+    answer matches the value of the plan's final claim, flags raised only
+    by the judge are dropped. If it disagrees, one more call names the
+    first wrong step, which is flagged with the program's answer as
+    evidence for the repair. A program that fails, or a plan whose last
+    step states no value, gives no signal.
+    \item \textbf{Do-no-harm rule.} If the recovered plan still fails
+    verification, the original plan is passed to Agent B instead.
+\end{enumerate}
+
+% ============================================================
+% 6. EXPERIMENTAL SETUP
+% ============================================================
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph*{Models.} We use two backbones (Table~\ref{tab:models}). In a
+given run the same model plays every role: the three agents, the claim
+extractor, the LLM judge, and the repair prompts.
+
+\begin{table}[t]
+\centering
+\caption{Models used in the experiments.}
+\label{tab:models}
+\begin{tabularx}{\columnwidth}{lX}
+\toprule
+\textbf{Model} & \textbf{Details}\\
+\midrule
+Qwen2.5-7B-Instruct & Served locally with Ollama (\texttt{qwen2.5:7b}),
+4-bit quantization (Q4\_K\_M), 4096-token context, one 6\,GB consumer
+GPU.\\
+GPT-4o-mini & OpenAI API, snapshot \texttt{gpt-4o-mini-2024-07-18}.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph*{Decoding.} The initial plan and all extraction,
+verification, and repair calls use temperature 0 and a fixed seed.
+Regeneration uses temperature 0.7 with a different seed for each attempt,
+because repeating a zero-temperature prompt tends to reproduce the
+rejected plan. Each call may generate at most 2048 tokens, the
+acceptance threshold is $\tau=0.80$, and a regeneration scope makes at
+most three attempts. Every call and its token counts are stored, so the
+reported runs can be replayed exactly. This matters for the API model,
+whose seed is only best-effort.
+
+\paragraph*{Systems.} Table~\ref{tab:systems} lists the systems. All of
+them run on the natural-error set with both models. The fault-injection
+experiment adds the fixed scopes as separate conditions and was run with
+Qwen2.5-7B. With GPT-4o-mini we also ran the natural-error set with the
+V2 verifier (Section~\ref{sec:v2}), and once with a shortened Agent B
+prompt to test whether tokens could be saved without losing accuracy.
+
+\begin{table}[t]
+\centering
+\caption{Systems and conditions evaluated.}
+\label{tab:systems}
+\begin{tabularx}{\columnwidth}{lX}
+\toprule
+\textbf{System} & \textbf{Description}\\
+\midrule
+A0 & Sequential baseline without verification.\\
+A2 & Verification, then full regeneration of Agent A.\\
+A3 & Verification, then isolated repair of the failed claims.\\
+A4 & ATBP: verification, then a scope chosen by
+Algorithm~\ref{alg:policy}.\\
+\midrule
+\multicolumn{2}{l}{\emph{Additional conditions in fault injection}}\\
+None & Corrupted trace passed to Agent B unchanged.\\
+Branch & Always branch backtracking.\\
+Agent & Always agent-level regeneration with feedback.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph*{Scoring.} The answer is the number on Agent C's
+\emph{Answer} line, compared numerically with the GSM8K reference. A
+missing answer counts as wrong. All systems are run on the same problems,
+so we compare them with an exact McNemar test on paired outcomes and
+report 95\% Wilson intervals. For A0, verification is not run, so ECR,
+RSR, and CDR are not applicable.
+
+% ============================================================
+% 7. EVALUATION METRICS
+% ============================================================
+\section{Evaluation Metrics}
+\label{sec:metrics}
+
+The primary metric is final-answer accuracy,
+\[
+\mathrm{Accuracy}=\frac{N_{\mathrm{correct}}}{N}.
+\]
+The metrics below describe recovery and its cost.
+
+\subsection{Error Cascade Rate}
+
+ECR is the share of examples with a detected intermediate fault that end
+with an incorrect answer:
+\[
+\mathrm{ECR}=
+\frac{N_{\mathrm{incorrect\ final\ answers\ after\ detection}}}
+{N_{\mathrm{examples\ with\ detected\ faults}}}.
+\]
+It is computed over examples in which initial verification rejected at
+least one claim. It measures association, not cause, because a detected
+fault may be a false alarm and downstream agents can add new errors. The
+fault-injection experiment is what estimates the effect of a known fault.
+
+\subsection{Repair Success Rate}
+
+RSR is the share of recovery actions that the verifier accepts on
+re-checking:
+\[
+\mathrm{RSR}=
+\frac{N_{\mathrm{successful\ recovery\ actions}}}
+{N_{\mathrm{recovery\ attempts}}}.
+\]
+Under claim-level recovery each repaired claim is one attempt. Under
+branch backtracking each recomputed claim is one attempt, and under
+regeneration each sampled plan is one attempt. An attempt succeeds when
+the affected claims pass re-verification. Because the unit differs
+between scopes, RSR values should be read together with the type of
+action. RSR measures acceptance by the verifier, not confirmed
+correctness.
+
+\subsection{Collateral Damage Rate}
+
+CDR is the share of previously accepted claims exposed to recovery that
+are discarded or rewritten:
+\[
+\mathrm{CDR}=
+\frac{N_{\mathrm{previously\ accepted\ claims\ altered}}}
+{N_{\mathrm{previously\ accepted\ claims\ exposed\ to\ recovery}}}.
+\]
+Under regeneration every accepted claim in the replaced plan counts as
+discarded. Under targeted repair an accepted claim counts only if the
+recovery rewrites it. CDR measures how much accepted reasoning changed,
+not whether the changes were wrong.
+
+\subsection{Token Usage and Model Time}
+
+Token usage is the mean number of prompt plus completion tokens per
+problem, summed over every call made by the agents, the claim extractor,
+the verifier, and recovery. Model time is the sum of the durations of
+those calls,
+\[
+\overline{T}=\frac{1}{N}\sum_{i=1}^{N}T_i,
+\]
+where $T_i$ is the model time for example $i$. We report model time
+rather than wall-clock time, because the cache and parallel execution
+make wall-clock time depend on how the runs were scheduled.
+
+\subsection{Scope Agreement}
+
+In the fault-injection experiment every scope is run on every case, so
+we can see which scopes reach the correct answer. Scope agreement is the
+share of cases in which A4 chose the scope that reached the correct
+answer with the fewest tokens. It shows how close the policy comes to the
+best choice available in hindsight.
+
+% ============================================================
+% 8. RESULTS
+% ============================================================
+\section{Results}
+\label{sec:results}
+
+We first report the fault-injection experiment, where the location of the
+error is known, and then the natural-error runs. All sample sizes are
+small, so the confidence intervals are wide and the comparisons below
+describe what happened on these problems rather than general rankings.
+
+\subsection{Controlled Fault Injection}
+
+On the eight problems, the clean pipeline with Qwen2.5-7B solved 6
+(75\%). On these clean traces the verifier wrongly rejected 4 of 48
+claims (8.3\%). All four false alarms came from the LLM judge, and two of
+the eight plans contained at least one.
+
+\paragraph*{Detection.} Table~\ref{tab:detect} shows how often the
+verifier flagged the injected claim. It found 18 of the 20 faults (90\%).
+Every arithmetic fault was caught by the deterministic check. The two
+misses were operand faults in deep positions, where the arithmetic is
+consistent and only the judge could have noticed the wrong quantity.
+
+\begin{table}[t]
+\centering
+\caption{Detection of injected faults (Qwen2.5-7B). ``Other flags''
+counts additional claims flagged in the same traces.}
+\label{tab:detect}
+\begin{tabular}{llccc}
+\toprule
+\textbf{Fault} & \textbf{Position} & \textbf{Cases} & \textbf{Detected} &
+\textbf{Other flags}\\
+\midrule
+Arithmetic & Deep & 6 & 6/6 & 4\\
+Arithmetic & Leaf & 6 & 6/6 & 1\\
+Operand & Deep & 4 & 2/4 & 3\\
+Operand & Leaf & 4 & 4/4 & 0\\
+\midrule
+All & & 20 & 18/20 (90\%) & 8\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph*{Recovery.} Table~\ref{tab:inject} gives final-answer accuracy
+for every scope. Without any recovery, 15 of the 20 corrupted traces
+still ended with the correct answer, because Agents B and C often noticed
+and corrected the injected value themselves. The five failures were all
+arithmetic faults, three deep and two leaf. Isolated repair, branch
+backtracking, full regeneration, and A4 recovered all 20 cases under both
+localization conditions. Agent-level regeneration did slightly worse
+(18/20 with oracle and 17/20 with detected localization). All of its
+failures were on one problem about feeding a flock of chickens: every
+regenerated plan worked out the daily feed in a new and wrong way, a
+mistake the original plan had not made.
+
+\begin{table*}[t]
+\centering
+\caption{Fault injection with Qwen2.5-7B: final-answer accuracy, mean
+tokens per case, and collateral damage for each recovery scope. The same
+20 corrupted traces are used in every row. Intervals are 95\% Wilson
+intervals.}
+\label{tab:inject}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{Oracle localization}} &
+\multicolumn{3}{c}{\textbf{Detected localization}}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+\textbf{Scope} & \textbf{Accuracy} & \textbf{Tokens} & \textbf{CDR} &
+\textbf{Accuracy} & \textbf{Tokens} & \textbf{CDR}\\
+\midrule
+None & 15/20 [53.1, 88.8] & 1417 & n/a & 15/20 [53.1, 88.8] & 1417 & n/a\\
+Isolated & 20/20 [83.9, 100] & 2243 & 0.0\% (0/86) & 20/20 [83.9, 100] & 2301 & 0.0\% (0/74)\\
+Branch & 20/20 [83.9, 100] & 2272 & 18.6\% (16/86) & 20/20 [83.9, 100] & 2316 & 9.5\% (7/74)\\
+Agent & 18/20 [69.9, 97.2] & 4136 & 100\% (86/86) & 17/20 [64.0, 94.8] & 3777 & 100\% (74/74)\\
+Full & 20/20 [83.9, 100] & 3616 & 100\% (86/86) & 20/20 [83.9, 100] & 3505 & 100\% (74/74)\\
+A4 (ATBP) & 20/20 [83.9, 100] & 2276 & 22.1\% (19/86) & 20/20 [83.9, 100] & 2461 & 13.5\% (10/74)\\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph*{Cost and collateral change.} A4 reached the same accuracy as
+full regeneration with 37\% fewer tokens under oracle localization (2276
+against 3616) and 30\% fewer under detected localization (2461 against
+3505). Its cost was close to that of isolated repair. Both regeneration
+scopes replaced every previously accepted claim, while A4 rewrote 22.1\%
+of them with oracle and 13.5\% with detected localization. These changes
+come from the cases in which A4 chose branch backtracking or, for three
+very short plans, regeneration.
+
+\paragraph*{Scope choice.} A4 chose the cheapest scope that reached the
+correct answer in 14 of 20 cases with oracle localization and in 11 of 20
+with detected localization. When it missed, it almost always chose a
+broader scope than needed. With oracle localization it used branch
+backtracking three times where isolated repair was enough, and it
+regenerated three plans of only three or four claims, where a branch
+would have covered most of the plan. With detected localization it twice
+chose full regeneration, after extra flags from the judge pushed the
+share of failed claims to one half or more. These faults were shallow. The deep targets had between one
+and three dependents, so isolated repair was enough in every case, and
+this experiment cannot yet show a case where a broader scope is
+necessary.
+
+\subsection{Natural Errors}
+
+Table~\ref{tab:accuracy} gives accuracy on the 30 unmodified problems.
+With GPT-4o-mini all four systems solved 28 problems (93.3\%) and agreed
+on every problem. With Qwen2.5-7B the baseline solved 26 (86.7\%) and
+each recovery system solved 25 (83.3\%). None of these differences is
+significant ($p=1.0$, exact McNemar test).
+
+\begin{table}[t]
+\centering
+\caption{Final-answer accuracy on the first 30 GSM8K test problems.
+Intervals are 95\% Wilson intervals.}
+\label{tab:accuracy}
+\begin{tabular}{lcc}
+\toprule
+\textbf{System} & \textbf{Qwen2.5-7B} & \textbf{GPT-4o-mini}\\
+\midrule
+A0 & 26/30 (86.7) [70.3, 94.7] & 28/30 (93.3) [78.7, 98.2]\\
+A2 & 25/30 (83.3) [66.4, 92.7] & 28/30 (93.3) [78.7, 98.2]\\
+A3 & 25/30 (83.3) [66.4, 92.7] & 28/30 (93.3) [78.7, 98.2]\\
+A4 & 25/30 (83.3) [66.4, 92.7] & 28/30 (93.3) [78.7, 98.2]\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The verifier flagged few plans: 3 of 30 with Qwen2.5-7B and 4 of 30 with
+GPT-4o-mini. With Qwen2.5-7B the single lost problem was a correct plan
+that the judge rejected. Every recovery scope rewrote it and produced a
+wrong answer, while the baseline's Agent C had answered correctly. With
+GPT-4o-mini three of the four flagged plans were already correct, and
+recovery did not change their answers. The model's two errors were not
+fixed. In one, a download that restarts from zero was misread, and no
+claim was flagged. In the other, the question asks for the first year in
+which the lemon tree makes money, and the plan was off by one year. The
+judge objected to a division that was in fact correct, and after the
+repair the answer was still wrong. Both are misreadings of
+the question, not slips in a calculation.
+
+\begin{table}[t]
+\centering
+\caption{Recovery metrics and cost on the natural-error set. Tokens are
+the mean per problem; time is mean model time in seconds.}
+\label{tab:recovery}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccccc}
+\toprule
+\textbf{Model} & \textbf{Sys.} & \textbf{ECR} & \textbf{RSR} &
+\textbf{CDR} & \textbf{Tokens} & \textbf{Time}\\
+\midrule
+\multirow{4}{*}{Qwen} & A0 & n/a & n/a & n/a & 2059 & 99.0\\
+& A2 & 2/3 & 2/6 & 14/14 & 4435 & 245.5\\
+& A3 & 2/3 & 2/6 & 0/14 & 4049 & 228.3\\
+& A4 & 2/3 & 1/8 & 4/14 & 4219 & 236.2\\
+\midrule
+\multirow{4}{*}{4o-mini} & A0 & n/a & n/a & n/a & 2168 & 6.6\\
+& A2 & 1/4 & 4/7 & 30/30 & 4399 & 14.7\\
+& A3 & 1/4 & 1/6 & 0/30 & 4127 & 13.8\\
+& A4 & 1/4 & 1/6 & 0/30 & 4127 & 13.8\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:recovery} reports recovery metrics and cost. Verification
+roughly doubled the token cost (1.9 to 2.2 times the baseline). Most of
+the extra cost is claim extraction and verification, which run on every
+problem, while recovery itself was triggered rarely. The pattern in
+collateral change is the same as under fault injection: full
+regeneration replaced every accepted claim in the flagged plans, while
+isolated repair replaced none and A4 replaced few or none. The RSR
+values rest on few attempts and use different units for different
+scopes, so we do not compare them further.
+
+\subsection{Verifier Refinements and Token Savings}
+
+Table~\ref{tab:v2} compares the original verifier with the V2
+configuration and with the shortened Agent B prompt, all with
+GPT-4o-mini on the same 30 problems.
+
+\begin{table}[t]
+\centering
+\caption{Verifier variants with GPT-4o-mini on the natural-error set.
+``Flagged'' is the number of initial plans with at least one rejected
+claim.}
+\label{tab:v2}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Variant} & \textbf{Flagged} & \textbf{A0 acc.} &
+\textbf{A4 acc.} & \textbf{A4 tokens}\\
+\midrule
+Original & 4/30 & 28/30 & 28/30 & 4127 ($1.90\times$)\\
+V2 & 2/30 & 28/30 & 28/30 & 4184 ($1.93\times$)\\
+Short Agent B & 6/30 & 27/30 & 27/30 & 3499 ($2.53\times$)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+V2 halved the number of flagged plans at almost no extra cost, and
+accuracy did not change. The value check dropped 11 claim-level flags
+whose ``correct'' value matched the stated one, and agreement with the
+program dropped 9 more. The program produced an answer for 27 of the 30
+problems and was right on 25 of them. It was wrong on one problem where
+the plan was right. There it flagged the correct plan, the repair did
+not pass re-verification, and the do-no-harm rule passed the original
+plan on, so the answer stayed correct. It did not help with the two
+misreadings. On the download problem the program made the same misreading
+as the plan, and on the lemon-tree problem its loop never ended, so it
+gave no answer.
+
+Shortening Agent B's prompt cut the baseline's cost by 36\% (from 2168
+to 1383 tokens per problem) but cost one problem. In that problem
+Agent A had misread a percentage increase. The full Agent B, which
+re-derives the solution, had corrected it, and the shortened one
+``corrected'' it to another wrong value. The extra tokens Agent B spends
+are part of why the baseline is hard to beat, so we kept the full prompt.
+
+\subsection{Comparison with Published Results}
+
+Table~\ref{tab:literature} places our accuracies beside selected
+published GSM8K results. The comparison is only indicative, since the
+published results differ in model, prompting, sample size, and answer
+extraction.
+
+\begin{table*}[t]
+\centering
+\caption{GSM8K accuracy: this work and selected published results.
+Protocols differ across rows. CI denotes a 95\% Wilson confidence
+interval for the 30-problem results.}
+\label{tab:literature}
+\begin{tabularx}{\textwidth}{llXcc}
+\toprule
+\textbf{Source} & \textbf{Model} & \textbf{Method / protocol} &
+\textbf{Examples} & \textbf{Acc. (\%)}\\
+\midrule
+\multicolumn{5}{l}{\emph{This work: zero-shot three-agent pipeline}}\\
+This work & Qwen2.5-7B-Instruct & A0: sequential baseline &
+30 & 86.7 [70.3, 94.7]\\
+This work & Qwen2.5-7B-Instruct & A2, A3, A4: verification and recovery &
+30 & 83.3 [66.4, 92.7]\\
+This work & GPT-4o-mini & A0: sequential baseline &
+30 & 93.3 [78.7, 98.2]\\
+This work & GPT-4o-mini & A2, A3, A4: verification and recovery &
+30 & 93.3 [78.7, 98.2]\\
+\midrule
+\multicolumn{5}{l}{\emph{Self-correction and multi-agent debate}}\\
+Huang et al. \cite{huang} & GPT-3.5 &
+Standard prompting & -- & 75.9\\
+Huang et al. \cite{huang} & GPT-3.5 &
+Intrinsic self-correction, two rounds & -- & 74.7\\
+Huang et al. \cite{huang} & GPT-3.5 &
+Self-correction with oracle labels & -- & 84.3\\
+Du et al. \cite{debate} & ChatGPT &
+Single agent & -- & 77.0\\
+Du et al. \cite{debate} & ChatGPT &
+Reflection & -- & 75.0\\
+Du et al. \cite{debate} & ChatGPT &
+Multi-agent debate & -- & 85.0\\
+Huang et al. \cite{huang} & GPT-3.5 &
+Debate vs.\ self-consistency, three responses & -- &
+83.2 vs.\ 82.5\\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+Our pipeline with GPT-4o-mini is above the 85.0\% reported for
+multi-agent debate, but the baseline reaches that level without any
+recovery, so this says more about the backbone than about ATBP. The
+published rows agree with what we see in one respect: extra rounds of
+checking do not reliably improve answers on their own \cite{huang}. We
+found no published baseline that reports ECR, RSR, and CDR under our
+definitions, so these metrics are compared only across our own systems.
+
+% ============================================================
+% 9. DISCUSSION AND LIMITATIONS
+% ============================================================
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+The results separate two questions that are easy to blur: whether a
+system can repair an error once it knows where the error is, and whether
+it can find the error in the first place.
+
+On the first question the answer is encouraging. When the faulty claim
+was known, isolated repair, branch backtracking, full regeneration, and
+ATBP all recovered every injected fault. ATBP did so at close to the cost
+of isolated repair and rewrote far less accepted reasoning than
+regeneration. Regeneration with feedback, which sounds like the more
+careful option, was the least reliable, because a rewritten plan can go
+wrong somewhere new. This supports the main idea behind ATBP, that
+recovery should touch as little of the plan as it needs to.
+
+On the second question the picture is different. On unmodified problems
+no recovery system beat the baseline, for two reasons. First, the
+baseline already corrects many errors. Agent B re-derives the solution,
+and in the injection experiment it absorbed 15 of the 20 faults with no
+recovery at all. The short Agent B prompt showed the same thing from the
+other side. Second, the errors that survive are misreadings of the
+question, and the verifier rarely detects them. The arithmetic checks
+cannot see them, the judge shares the agents' blind spots, and even an
+independent program made the same misreading in one case. A wrong flag
+can also do harm: with Qwen2.5-7B one correct answer was lost after a
+false alarm. The do-no-harm rule and the value and program checks in V2
+address this, and they halved the false alarms with GPT-4o-mini.
+
+For the research questions this means the following. RQ2 is partly
+answered: the scopes differ clearly in collateral change and cost, and
+agent-level regeneration repairs less reliably. RQ1 remains open. ATBP
+matched the best fixed scopes, but in our cases isolated repair was
+always enough, so the policy had little to choose between. For RQ3 the
+same pattern appeared with both models, and the stronger model made
+fewer errors, which left recovery even less room to help.
+
+The study has the following limitations.
+\begin{enumerate}
+    \item The samples are small: 30 problems for natural errors and 20
+    injected faults on six problems.
+    \item Fault injection was run only with Qwen2.5-7B, and the injected
+    faults were shallow, with at most three dependents.
+    \item The same model generates, extracts, and judges, so its errors
+    may be correlated. Only the arithmetic and grounding checks are
+    independent of the model.
+    \item The policy thresholds were set by hand, and the confidence
+    feature is used only through the acceptance threshold.
+    \item Claim extraction and dependency links have not been checked
+    against human labels.
+    \item CDR counts changed claims but does not check whether the
+    changes were correct.
+    \item An earlier pilot with \texttt{llama3.2} on 41 problems is not
+    comparable with these results, because its systems did not share
+    the initial plan and its tokens were not recorded.
+\end{enumerate}
+
+The next stage follows from these results. It will use larger samples,
+including problems on which the baseline fails, so that a better system
+has room to show it. It will inject harder faults, such as several
+faults per trace, faults in long dependency chains, and misreadings of
+the question, and it will run fault injection with GPT-4o-mini as well.
+The oracle runs already record which scope was cheapest in each case, and
+we plan to learn the scope policy from these records instead of setting
+the thresholds by hand.
+
+% ============================================================
+% 10. CONCLUSION
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presents ATBP, a recovery-scope selection method for
+sequential multi-agent reasoning. It splits intermediate reasoning into
+atomic claims, links them in a dependency graph, checks them with a
+hybrid verifier, and chooses among isolated claim repair,
+dependency-aware branch backtracking, agent-level regeneration, and full
+regeneration. Prior rollback, verification, and correction methods each
+cover part of this problem, but none we found chooses the recovery scope
+from claim dependencies.
+
+Under controlled fault injection the verifier found 90\% of the
+injected faults, and ATBP recovered every case at 30--37\% lower token
+cost than full regeneration while rewriting only a small share of the
+accepted reasoning. On unmodified GSM8K problems recovery did not improve
+accuracy. Every system reached 93.3\% with GPT-4o-mini, and recovery lost
+one problem with Qwen2.5-7B. The errors that remained were misreadings of
+the question that the verifier did not detect, and the baseline's second
+agent already corrected many of the others.
+
+Targeted repair works when the error is found. The harder problem is
+finding it. The next stage therefore concentrates on detection, harder
+and deeper faults, larger samples, and a learned scope policy.
+
+% ============================================================
+% REFERENCES
+% ============================================================
+\begin{thebibliography}{99}
+
+% -------------------- 2026 --------------------
+
+\bibitem{agentask}
+B. Lin, K. Yang, Z. Tan, Y. Lai, C. Zhang, G. Zhang, X. Yu,
+M. Yu, X. Wang, Y. Zhang, and Y. Wang,
+``AgentAsk: Multi-Agent Systems Need to Ask,''
+in \emph{Proceedings of the 64th Annual Meeting of the Association
+for Computational Linguistics}, 2026, pp. 28055--28077,
+doi: 10.18653/v1/2026.acl-long.1294.
+
+\bibitem{march}
+Z. Li, Y. Zhang, P. Cheng, J. Song, M. Zhou, H. Li, S. Hu,
+Y. Qin, E. Zhao, X. Jiang, and G. Jiang,
+``MARCH: Multi-Agent Reinforced Check for Hallucination,''
+in \emph{Proceedings of the 64th Annual Meeting of the Association
+for Computational Linguistics}, 2026, pp. 39389--39415,
+doi: 10.18653/v1/2026.acl-long.1828.
+
+\bibitem{raffles}
+C. Zhu, S. Hong, J. Wu, K. Chawla, Y. Tang, Y. Yin, N. Wolfe,
+E. Babinsky, and D. Liu,
+``RAFFLES: Reasoning-based Attribution of Faults for LLM Systems,''
+in \emph{Proceedings of the 19th Conference of the European Chapter
+of the Association for Computational Linguistics}, 2026, pp. 7659--7688,
+doi: 10.18653/v1/2026.eacl-long.359.
+
+% -------------------- 2025 --------------------
+
+\bibitem{agentdebug}
+K. Zhu et al.,
+``Where LLM Agents Fail and How They Can Learn From Failures,''
+arXiv:2509.25370, 2025.
+
+\bibitem{deductive}
+Z. Sadeddine and F. M. Suchanek,
+``Verifying the Steps of Deductive Reasoning Chains,''
+in \emph{Findings of the Association for Computational Linguistics:
+ACL 2025}, Vienna, Austria, 2025, pp. 456--475.
+
+\bibitem{fgprm}
+R. Li, Z. Luo, and X. Du,
+``FG-PRM: Fine-grained Hallucination Detection and Mitigation in
+Language Model Mathematical Reasoning,''
+in \emph{Findings of the Association for Computational Linguistics:
+EMNLP 2025}, Suzhou, China, 2025, pp. 4247--4278.
+
+\bibitem{huangres}
+J.-t. Huang, J. Zhou, T. Jin, X. Zhou, Z. Chen, W. Wang, Y. Yuan,
+M. R. Lyu, and M. Sap,
+``On the Resilience of LLM-Based Multi-Agent Collaboration with Faulty
+Agents,''
+in \emph{Proceedings of the 42nd International Conference on Machine
+Learning}, vol. 267, 2025, pp. 26202--26226.
+
+\bibitem{magicore}
+J. Chen, A. Prasad, S. Saha, E. Stengel-Eskin, and M. Bansal,
+``MAgICoRe: Multi-Agent, Iterative, Coarse-to-Fine Refinement for
+Reasoning,''
+in \emph{Proceedings of the 2025 Conference on Empirical Methods
+in Natural Language Processing}, Suzhou, China, 2025, pp. 32663--32686,
+doi: 10.18653/v1/2025.emnlp-main.1660.
+
+\bibitem{mast}
+M. Cemri, M. Z. Pan, S. Yang, L. A. Agrawal, B. Chopra, R. Tiwari,
+K. Keutzer, A. Parameswaran, D. Klein, K. Ramchandran, M. Zaharia,
+J. E. Gonzalez, and I. Stoica,
+``Why Do Multi-Agent LLM Systems Fail?''
+in \emph{Advances in Neural Information Processing Systems}, vol. 38,
+Datasets and Benchmarks Track, 2025.
+
+\bibitem{prmlessons}
+Z. Zhang, C. Zheng, Y. Wu, B. Zhang, R. Lin, B. Yu, D. Liu,
+J. Zhou, and J. Lin,
+``The Lessons of Developing Process Reward Models in Mathematical
+Reasoning,''
+in \emph{Findings of the Association for Computational Linguistics:
+ACL 2025}, Vienna, Austria, 2025, pp. 10495--10516.
+
+\bibitem{reagent}
+X. Zhao, F. Gao, X. Song, Y. Chen, R. Yang, Y. Fu, Y. Wang,
+Y. Iwasawa, Y. Matsuo, and I. Li,
+``ReAgent: Reversible Multi-Agent Reasoning for Knowledge-Enhanced
+Multi-Hop QA,''
+in \emph{Proceedings of the 2025 Conference on Empirical Methods
+in Natural Language Processing}, Suzhou, China, 2025, pp. 4067--4089,
+doi: 10.18653/v1/2025.emnlp-main.202.
+
+\bibitem{whowhen}
+S. Zhang, M. Yin, J. Zhang, J. Liu, Z. Han, J. Zhang, B. Li,
+C. Wang, H. Wang, Y. Chen, and Q. Wu,
+``Which Agent Causes Task Failures and When? On Automated Failure
+Attribution of LLM Multi-Agent Systems,''
+in \emph{Proceedings of the 42nd International Conference on Machine
+Learning}, vol. 267, 2025, pp. 76583--76599.
+
+% -------------------- 2024 --------------------
+
+\bibitem{agentbench}
+X. Liu et al.,
+``AgentBench: Evaluating LLMs as Agents,''
+in \emph{Proceedings of the International Conference on Learning
+Representations}, 2024.
+
+\bibitem{debate}
+Y. Du, S. Li, A. Torralba, J. B. Tenenbaum, and I. Mordatch,
+``Improving Factuality and Reasoning in Language Models through
+Multiagent Debate,''
+in \emph{Proceedings of the 41st International Conference on Machine
+Learning}, vol. 235, 2024, pp. 11733--11763.
+
+\bibitem{huang}
+J. Huang, X. Chen, S. Mishra, H. S. Zheng, A. W. Yu, X. Song,
+and D. Zhou,
+``Large Language Models Cannot Self-Correct Reasoning Yet,''
+in \emph{Proceedings of the International Conference on Learning
+Representations}, 2024.
+
+\bibitem{mathshepherd}
+P. Wang, L. Li, Z. Shao, R. Xu, D. Dai, Y. Li, D. Chen, Y. Wu,
+and Z. Sui,
+``Math-Shepherd: Verify and Reinforce LLMs Step-by-Step without
+Human Annotations,''
+in \emph{Proceedings of the 62nd Annual Meeting of the Association
+for Computational Linguistics}, 2024, pp. 9426--9439,
+doi: 10.18653/v1/2024.acl-long.510.
+
+\bibitem{processsupervision}
+H. Lightman et al.,
+``Let's Verify Step by Step,''
+in \emph{International Conference on Learning Representations},
+2024. [Online]. Available:
+\url{https://arxiv.org/abs/2305.20050}
+
+\bibitem{stepwise}
+N. Daheim, J. Macina, M. Kapur, I. Gurevych, and M. Sachan,
+``Stepwise Verification and Remediation of Student Reasoning Errors
+with Large Language Model Tutors,''
+in \emph{Proceedings of the 2024 Conference on Empirical Methods in
+Natural Language Processing}, Miami, FL, USA, 2024, pp. 8386--8411,
+doi: 10.18653/v1/2024.emnlp-main.478.
+
+\bibitem{tyen}
+G. Tyen, H. Mansoor, V. Carbune, P. Chen, and T. Mak,
+``LLMs cannot find reasoning errors, but can correct them given the
+error location,''
+in \emph{Findings of the Association for Computational Linguistics:
+ACL 2024}, Bangkok, Thailand, 2024, pp. 13894--13908,
+doi: 10.18653/v1/2024.findings-acl.826.
+
+% -------------------- 2023 --------------------
+
+\bibitem{factscore}
+S. Min, K. Krishna, X. Lyu, M. Lewis, W.-t. Yih, P. W. Koh,
+M. Iyyer, L. Zettlemoyer, and H. Hajishirzi,
+``FActScore: Fine-grained Atomic Evaluation of Factual Precision
+in Long Form Text Generation,''
+in \emph{Proceedings of the 2023 Conference on Empirical Methods
+in Natural Language Processing}, Singapore, 2023, pp. 12076--12100.
+
+% -------------------- datasets and methods used --------------------
+
+\bibitem{gsm8k}
+K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser,
+M. Plappert, J. Tworek, J. Hilton, R. Nakano, C. Hesse, and J. Schulman,
+``Training Verifiers to Solve Math Word Problems,''
+\emph{arXiv preprint arXiv:2110.14168}, 2021.
+
+\bibitem{pal}
+L. Gao, A. Madaan, S. Zhou, U. Alon, P. Liu, Y. Yang, J. Callan, and
+G. Neubig,
+``PAL: Program-aided Language Models,''
+in \emph{Proceedings of the 40th International Conference on Machine
+Learning (ICML)}, Honolulu, HI, USA, 2023, pp. 10764--10799.
+
+\end{thebibliography}
+
+\end{document}

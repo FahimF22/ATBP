@@ -1,8 +1,46 @@
+from config import config as cfg
 from src.llm_client import call_llm
 
 
+LEAN_PROMPT = """
+You are Agent B in a sequential multi-agent reasoning system.
+
+Your role is Intermediate Solver.
+
+Check Agent A's reasoning for the problem below: verify every calculation and
+whether the right quantities and operations are used.
+
+Be brief:
+- If every step is correct, write "All steps correct." and the final value.
+- If a step is wrong, write only the corrected steps (one line each, with the
+  calculation) and the corrected final value.
+Do not restate correct steps or explain them.
+
+Original problem:
+{problem}
+
+Agent A reasoning:
+{agent_a_output}
+"""
+
+
 def agent_b(problem, agent_a_output):
-    prompt = f"""
+    if cfg.LEAN:
+        prompt = LEAN_PROMPT.format(problem=problem, agent_a_output=agent_a_output)
+    else:
+        prompt = _full_prompt(problem, agent_a_output)
+    try:
+        text, _, _ = call_llm(
+            system_prompt="You are Agent B, the intermediate solver.",
+            user_content=prompt,
+        )
+        return text
+    except Exception as e:
+        return f"[Error in Agent B: {str(e)[:200]}]"
+
+
+def _full_prompt(problem, agent_a_output):
+    return f"""
 You are Agent B in a sequential multi-agent reasoning system.
 
 Your role is Intermediate Solver.
@@ -27,12 +65,3 @@ Agent A reasoning:
 
 Provide the intermediate solution clearly.
 """
-
-    try:
-        text, _, _ = call_llm(
-            system_prompt="You are Agent B, the intermediate solver.",
-            user_content=prompt,
-        )
-        return text
-    except Exception as e:
-        return f"[Error in Agent B: {str(e)[:200]}]"

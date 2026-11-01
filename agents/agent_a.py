@@ -1,7 +1,11 @@
 from src.llm_client import call_llm
 
 
-def agent_a(problem):
+def agent_a(problem, feedback=None, temperature=None, seed=None):
+    """
+    feedback: optional text describing errors in an earlier plan (agent-level
+    recovery). temperature/seed: used when sampling a new plan.
+    """
     prompt = f"""
 Output ONLY the step-by-step reasoning plan. Do NOT include any preamble, greeting, or meta-commentary. Start immediately with Step 1.
 
@@ -30,9 +34,18 @@ Always list all multipliers explicitly before combining them.
 Problem:
 {problem}
 """
+    if feedback:
+        prompt += f"""
+A previous plan for this problem was checked and these steps were found to be wrong:
+{feedback}
+
+Write a new, corrected plan. Do not repeat these mistakes.
+"""
 
     text, _, _ = call_llm(
         system_prompt="You are Agent A, the planning and reasoning agent.",
         user_content=prompt,
+        temperature=temperature,
+        seed=seed,
     )
-    return text
+    return text
